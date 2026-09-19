@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Пляжной волейбол — турниры</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#fff; --ink:#1d2433; --muted:#6b7280; --line:#e3e6ea;
+    --accent:#1f6feb; --accent-d:#1858c4; --good:#1a7f37; --good-bg:#e7f6ec;
+    --warn:#b45309; --warn-bg:#fdf3e3; --bad:#b42318; --bad-bg:#fdecea;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%;
+  }
+  #app{max-width:920px;margin:0 auto;padding:14px 14px 64px}
+  header{margin:4px 0 14px}
+  h1{font-size:20px;margin:0}
+  .navtop{display:flex;gap:14px;margin-bottom:6px}
+  .navlink{color:var(--accent);cursor:pointer;font-size:13px;text-decoration:none}
+  .navlink:hover{text-decoration:underline}
+  h2{font-size:15px;margin:0 0 8px}
+  .sub,.hint,.readonly-note{color:var(--muted);font-size:13px}
+  .readonly-note{background:var(--warn-bg);border:1px solid #f0d9b5;border-radius:6px;padding:6px 10px;margin:8px 0}
+  section.court{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin:12px 0}
+  .players{color:var(--muted);font-size:13px;margin:0 0 10px}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:4px 0 14px}
+  th,td{padding:6px 8px;text-align:center;border-bottom:1px solid var(--line)}
+  th{font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  td.name,th.name{text-align:left}
+  tr.zone-prom td{background:var(--good-bg)}
+  tr.zone-rel td{background:var(--warn-bg)}
+  .over{color:var(--bad);font-weight:700;white-space:nowrap}
+  .schedule{display:flex;flex-direction:column;gap:8px}
+  .game{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fbfbfc;position:relative}
+  .game.next{border-color:var(--accent);background:#f0f6ff}
+  .game.done{opacity:.88}
+  .ghead{font-size:12px;color:var(--muted);margin-bottom:4px}
+  .teams{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .teams span,.teams label{flex:1;min-width:90px}
+  .teams span:nth-child(2),.teams span:nth-child(3){flex:0}
+  .teams b{font-variant-numeric:tabular-nums}
+  .match-names{display:flex;justify-content:space-between;gap:10px;margin:6px 0 2px}
+  .match-names .t-left,.match-names .t-right{flex:1;min-width:0}
+  .match-names .t-left{text-align:left}
+  .match-names .t-right{text-align:right}
+  .match-score{display:flex;justify-content:center;align-items:center;gap:10px;margin:6px 0 10px}
+  .match-score input{width:64px}
+  .match-score b{font-size:16px;font-variant-numeric:tabular-nums}
+  .pending{color:var(--muted);text-align:center}
+  input[type=number]{width:54px;font-size:16px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;text-align:center;background:#fff}
+  button{
+    font:inherit;font-weight:600;cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:#fff;
+    border-radius:8px;padding:8px 14px;-webkit-tap-highlight-color:transparent;margin:4px 4px 4px 0;
+  }
+  button:active{background:var(--accent-d)}
+  button.edit,.nav button.edit{background:#fff;color:var(--ink);border-color:var(--line)}
+  button.danger{background:#fff;color:var(--bad);border-color:var(--line)}
+  footer{margin-top:18px}
+  .setup ol{list-style:none;padding:0;margin:10px 0 14px}
+  .setup li{display:flex;align-items:center;gap:8px;margin:0 0 6px}
+  .setup .court-tag{width:34px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .setup input[type=text]{flex:1;font-size:16px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#fff}
+  .setup .tname{margin:6px 0 10px}
+  .setup .tname input{font-size:16px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;width:100%}
+  .promo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin:12px 0}
+  .promo p{margin:4px 0}
+  .banner{background:var(--bad-bg);border:1px solid #f3c9c5;color:var(--bad);border-radius:8px;padding:8px 10px;font-size:13px;margin:8px 0}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:759px){.cols{grid-template-columns:1fr}}
+  .history ul{list-style:none;padding:0;margin:8px 0}
+  .hist-item{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;
+    background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:6px 0;color:var(--ink);font-weight:400}
+  .hist-item .hist-date{color:var(--muted);font-size:13px}
+  .hist-row{display:flex;gap:8px;align-items:stretch;margin:6px 0}
+  .hist-row .hist-item{margin:0}
+  .hist-del{background:#fff;color:var(--bad);border:1px solid var(--line);border-radius:8px;padding:0 12px;font-weight:700;cursor:pointer;flex:0 0 auto}
+  .empty{color:var(--muted);padding:10px}
+  .toolbar{display:flex;flex-wrap:wrap;align-items:center;margin-top:6px}
+  details.r-results{margin:8px 0}
+  details.r-results>summary{cursor:pointer;font-weight:600;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;font-size:14px}
+  details.r-results[open]>summary{margin-bottom:8px}
+  h2.r-head{margin:14px 0 6px;font-size:15px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+/* ======================= Константы ======================= */
+const STORAGE_KEY = "bk-volley-v2";
+const MOSCOW_TZ = "Europe/Moscow";
+// Близкая 1-факторизация K5: 5 матчей, MATCHINGS[s] отдыхает слот s. Каждая пара — однократно в одной команде.
+const MATCHINGS = [
+  { a:[1,4], b:[2,3] },
+  { a:[0,2], b:[3,4] },
+  { a:[0,4], b:[1,3] },
+  { a:[0,1], b:[2,4] },
+  { a:[0,3], b:[1,2] },
+];
+const MONTHS_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+
+/* ======================= Состояние ======================= */
+let state = loadState() || { tournaments: [], activeId: null, view: "setup", viewId: null, seq: 0 };
+if(typeof state.seq !== "number") state.seq = 0;
+
+function save(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){} }
+function loadState(){ try{ const s=localStorage.getItem(STORAGE_KEY); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function newId(){ state.seq = (state.seq||0)+1; return state.seq; }
+function getActive(){ return state.tournaments.find(t=>t.id===state.activeId) || null; }
+function lastCompleted(){ return state.tournaments.filter(t=>t.phase==="done").sort((a,b)=>cmpDate(b.date,a.date))[0] || null; }
+
+/* ======================= Утилиты ======================= */
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function playerName(T,id){ const p=T.players[id]; return p ? p.name : ("?"+id); }
+function permutations(arr){
+  if(arr.length<=1) return [arr.slice()];
+  const out=[];
+  for(let i=0;i<arr.length;i++){
+    const rest=arr.slice(0,i).concat(arr.slice(i+1));
+    for(const p of permutations(rest)) out.push([arr[i], ...p]);
+  }
+  return out;
+}
+function cmpArr(a,b){ const n=Math.max(a.length,b.length); for(let i=0;i<n;i++){const d=(a[i]||0)-(b[i]||0); if(d) return d;} return 0; }
+function cmpDate(x,y){ if(x.year!==y.year) return x.year-y.year; if(x.month!==y.month) return x.month-y.month; return x.day-y.day; }
+function dedupeNames(names){
+  const seen={}; const out=[];
+  for(const n of names){
+    if(seen[n]!=null){ seen[n]++; out.push(n+" "+seen[n]); }
+    else { seen[n]=1; out.push(n); }
+  }
+  return out;
+}
+
+/* ======================= Даты (среда по Москве) ======================= */
+function moscowParts(){
+  const f=new Intl.DateTimeFormat("en-US",{timeZone:MOSCOW_TZ, weekday:"short", year:"numeric", month:"2-digit", day:"2-digit"});
+  const o={}; f.formatToParts(new Date()).forEach(p=>{o[p.type]=p.value;});
+  const wd={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[o.weekday];
+  return {year:+o.year, month:+o.month, day:+o.day, wd:wd};
+}
+// Ближайшая среда (включая сегодня) — для первого запуска; либо строго после after (для следующего турнира).
+function nextWednesday(after){
+  let d, wd;
+  if(after){
+    d=new Date(Date.UTC(after.year, after.month-1, after.day));
+    d.setUTCDate(d.getUTCDate()+1);
+    wd=d.getUTCDay();
+  } else {
+    const p=moscowParts();
+    d=new Date(Date.UTC(p.year, p.month-1, p.day));
+    wd=p.wd;
+  }
+  const delta=(3-wd+7)%7;
+  d.setUTCDate(d.getUTCDate()+delta);
+  return {year:d.getUTCFullYear(), month:d.getUTCMonth()+1, day:d.getUTCDate()};
+}
+function formatDate(d){ return d.day+" "+MONTHS_RU[d.month-1]+" "+d.year; }
+
+/* ======================= Расписание ======================= */
+function buildGames(slotOrder){
+  const games=[];
+  for(let p=0;p<5;p++){
+    const m=MATCHINGS[p];
+    games.push({ order:p+1, rest:slotOrder[p],
+      teamA:[slotOrder[m.a[0]], slotOrder[m.a[1]]],
+      teamB:[slotOrder[m.b[0]], slotOrder[m.b[1]]], scoreA:null, scoreB:null });
+  }
+  return games;
+}
+function restPos(T, playerId, roundNum){
+  const r=T.rounds[roundNum]; if(!r) return undefined;
+  for(const c of [1,2]) for(const g of r.courts[c].games) if(g.rest===playerId) return g.order;
+  return undefined;
+}
+function maxRun(T, pid){
+  const r1=restPos(T,pid,1); if(r1==null) return 0;
+  const r2=restPos(T,pid,2); if(r2==null) return Math.max(r1-1, 5-r1);
+  return Math.max(r1-1, 4+r2-r1, 5-r2);
+}
+function overallMaxRun(T){
+  let m=0, who=[];
+  for(const p of T.players){ const r=maxRun(T,p.id); if(r>m){m=r;who=[p.name];} else if(r===m && r>0) who.push(p.name); }
+  return {max:m, who};
+}
+function buildOptimizedR2(players, r1Map){
+  const r1=players.map(p=>r1Map[p]);
+  let best=null;
+  for(const perm of permutations([1,2,3,4,5])){
+    const r2=perm;
+    const runs=players.map((_,i)=>Math.max(r1[i]-1, 4+r2[i]-r1[i], 5-r2[i]));
+    const key=runs.slice().sort((x,y)=>y-x);
+    if(!best||cmpArr(key,best.key)<0) best={perm,key};
+  }
+  const r2=best.perm;
+  const slotOrder=[null,null,null,null,null];
+  for(let i=0;i<5;i++) slotOrder[r2[i]-1]=players[i];
+  return buildGames(slotOrder);
+}
+function computeStandings(T, games, playerIds){
+  const stats=new Map();
+  for(const pid of playerIds) stats.set(pid,{wins:0,losses:0,forPts:0,againstPts:0,gp:0});
+  for(const g of games){
+    if(g.scoreA==null||g.scoreB==null) continue;
+    const aWin=g.scoreA>g.scoreB, bWin=g.scoreB>g.scoreA;
+    for(const pid of g.teamA){const s=stats.get(pid);s.gp++;s.forPts+=g.scoreA;s.againstPts+=g.scoreB;if(aWin)s.wins++;else if(bWin)s.losses++;}
+    for(const pid of g.teamB){const s=stats.get(pid);s.gp++;s.forPts+=g.scoreB;s.againstPts+=g.scoreA;if(bWin)s.wins++;else if(aWin)s.losses++;}
+  }
+  const arr=playerIds.map(pid=>{const s=stats.get(pid);return{pid,wins:s.wins,losses:s.losses,forPts:s.forPts,againstPts:s.againstPts,diff:s.forPts-s.againstPts,gp:s.gp,run:maxRun(T,pid)};});
+  arr.sort((x,y)=>y.wins-x.wins||y.diff-x.diff||y.forPts-x.forPts||playerName(T,x.pid).localeCompare(playerName(T,y.pid)));
+  return arr;
+}
+// Переход: топ-2 площадки2 → на 1, худшие-2 площадки1 → на 2. Чистая (без побочных эффектов).
+function computePromotion(T, roundNum){
+  const c1=T.rounds[roundNum].courts[1], c2=T.rounds[roundNum].courts[2];
+  const st1=computeStandings(T, c1.games, c1.players);
+  const st2=computeStandings(T, c2.games, c2.players);
+  const rel=[st1[4].pid, st1[3].pid];      // худшие 2 площадки 1
+  const prom=[st2[0].pid, st2[1].pid];      // лучшие 2 площадки 2
+  const stayC1=c1.players.filter(p=>!rel.includes(p));
+  const stayC2=c2.players.filter(p=>!prom.includes(p));
+  return { newC1:stayC1.concat(prom), newC2:stayC2.concat(rel), promoted:prom, relegated:rel };
+}
+
+/* ======================= ЖЦ турниров ======================= */
+function upcomingDate(){
+  const arr=state.tournaments;
+  if(!arr.length) return nextWednesday(null); // первый турнир — ближайшая среда от сегодня
+  let latest=arr[0];
+  for(const t of arr) if(cmpDate(t.date, latest.date)>0) latest=t;
+  return nextWednesday(latest.date); // следующая среда после последнего турнира (еженедельная каденция)
+}
+function createEmptyUpcoming(){
+  const date=upcomingDate();
+  return { id:newId(), name:formatDate(date), date, phase:"setup",
+    players:Array.from({length:10},(_,i)=>({id:i,name:""})),
+    rounds:{1:null,2:null}, promotion:null };
+}
+function createUpcomingFrom(prev){
+  const p=computePromotion(prev, 2);   // из финала (R2) прошлого турнира
+  const order=p.newC1.concat(p.newC2);
+  const names=dedupeNames(order.map(pid=>prev.players[pid].name));
+  const date=nextWednesday(prev.date); // следующая среда после прошлого
+  return { id:newId(), name:formatDate(date), date, phase:"setup",
+    players:names.map((n,i)=>({id:i,name:n})),
+    rounds:{1:null,2:null}, promotion:null };
+}
+function ensureActive(){
+  if(!state.activeId || !getActive()){
+    const prev=lastCompleted();
+    const T = prev ? createUpcomingFrom(prev) : createEmptyUpcoming();
+    state.tournaments.push(T); state.activeId=T.id;
+  }
+}
+// Пересчитать дату активного «грядущего» (setup) = следующая среда после последнего
+// ДРУГОГО турнира. Гарантирует, что после удаления/импорта дата не «застрянет».
+function refreshActiveUpcoming(){
+  const T=getActive(); if(!T || T.phase!=="setup") return;
+  const others=state.tournaments.filter(t=>t.id!==T.id);
+  if(!others.length) return; // первый турнир — дату не трогаем
+  let latest=others[0];
+  for(const t of others) if(cmpDate(t.date, latest.date)>0) latest=t;
+  const newDate=nextWednesday(latest.date);
+  if(cmpDate(T.date, newDate)===0) return;
+  const wasDefault = !T.name || T.name===formatDate(T.date);
+  T.date=newDate;
+  if(wasDefault) T.name=formatDate(newDate);
+}
+function r1MapOf(T){
+  const m={}; for(const c of [1,2]) for(const pid of T.rounds[1].courts[c].players) m[pid]=restPos(T,pid,1);
+  return m;
+}
+function startTournament(){
+  const T=getActive();
+  const name=(document.getElementById("tname").value||"").trim() || formatDate(T.date);
+  const names=[];
+  for(let i=0;i<10;i++){
+    const v=(document.getElementById("pname-"+i).value||"").trim();
+    if(!v){ alert("Введите имя игрока "+(i+1)); document.getElementById("pname-"+i).focus(); return; }
+    names.push(v);
+  }
+  T.name=name;
+  T.players=dedupeNames(names).map((n,i)=>({id:i,name:n}));
+  T.rounds={ 1:{courts:{
+      1:{players:[0,1,2,3,4], games:buildGames([0,1,2,3,4])},
+      2:{players:[5,6,7,8,9], games:buildGames([5,6,7,8,9])},
+    }}, 2:null };
+  T.promotion=null; T.phase="round1"; state.view="tournament";
+  save(); render();
+}
+function reshufflePrefill(){
+  const prev=lastCompleted();
+  if(!prev){ alert("Нет завершённого турнира для предзаполнения."); return; }
+  const p=computePromotion(prev,2);
+  const order=p.newC1.concat(p.newC2);
+  const names=dedupeNames(order.map(pid=>prev.players[pid].name));
+  const T=getActive();
+  T.players=names.map((n,i)=>({id:i,name:n}));
+  save(); render();
+}
+function startRound2(){ const T=getActive(); T.phase="round2"; save(); render(); }
+function backToRound1(){ const T=getActive(); T.phase="round1"; T.rounds[2]=null; T.promotion=null; save(); render(); }
+function restartTournament(){
+  if(!confirm("Начать этот турнир заново? Счёт и расписание сбросятся, участники останутся.")) return;
+  const T=getActive(); T.phase="setup"; T.rounds={1:null,2:null}; T.promotion=null; state.view="setup";
+  save(); render();
+}
+function currentRound(T){ return T.phase==="round1" ? 1 : 2; }
+function roundComplete(T, r){
+  const rd=T.rounds[r]; if(!rd) return false;
+  for(const c of [1,2]) for(const g of rd.courts[c].games) if(g.scoreA==null||g.scoreB==null) return false;
+  return true;
+}
+function saveScore(court, order){
+  const T=getActive(); const r=currentRound(T);
+  const a=parseInt(document.getElementById("sc-"+court+"-"+order+"-a").value,10);
+  const b=parseInt(document.getElementById("sc-"+court+"-"+order+"-b").value,10);
+  if(Number.isNaN(a)||Number.isNaN(b)){ alert("Введите счёт обеих команд"); return; }
+  if(a<0||b<0){ alert("Счёт не может быть отрицательным"); return; }
+  if(a===b){ alert("Ничьей не бывает — нужен победитель"); return; }
+  const game=T.rounds[r].courts[court].games.find(g=>g.order===order);
+  game.scoreA=a; game.scoreB=b;
+  if(roundComplete(T,r)){
+    if(r===1){
+      const p=computePromotion(T,1);
+      const r1m=r1MapOf(T);
+      T.rounds[2]={courts:{
+        1:{players:p.newC1, games:buildOptimizedR2(p.newC1, r1m)},
+        2:{players:p.newC2, games:buildOptimizedR2(p.newC2, r1m)},
+      }};
+      T.promotion={fromC2toC1:p.promoted, fromC1toC2:p.relegated};
+      T.phase="betweenRounds";
+    } else { T.phase="done"; }
+  }
+  save(); render();
+}
+function clearScore(court, order){
+  const T=getActive(); const r=currentRound(T);
+  const game=T.rounds[r].courts[court].games.find(g=>g.order===order);
+  game.scoreA=null; game.scoreB=null; save(); render();
+}
+function newTournament(){
+  const prev=getActive();     // завершённый (done)
+  const nt=createUpcomingFrom(prev);
+  state.tournaments.push(nt); state.activeId=nt.id; state.view="setup";
+  save(); render();
+}
+/* навигация */
+function goHome(){ const T=getActive(); state.view = (T && T.phase!=="setup") ? "tournament" : "setup"; state.viewId=null; render(); }
+function goHistory(){ state.view="history"; state.viewId=null; render(); }
+function openTournament(id){ state.view="historyDetail"; state.viewId=id; render(); }
+function deleteTournament(id){
+  const t=state.tournaments.find(x=>x.id===id);
+  if(!t) return;
+  if(!confirm('Удалить турнир «'+t.name+'» из истории? Действие необратимо.')) return;
+  const idx=state.tournaments.findIndex(x=>x.id===id);
+  state.tournaments.splice(idx,1);
+  if(state.activeId===id){
+    state.activeId=null;
+    ensureActive();
+  }
+  refreshActiveUpcoming();
+  state.view="history"; state.viewId=null;
+  save(); render();
+}
+
+/* ======================= PNG: итоговые таблицы ======================= */
+function drawTables(T){
+  const cols=["#","Игрок","В-П","Очки","Разн."];
+  const padX=12, rowH=27, headerH=30, titleArea=72, gap=44, marginX=22;
+  const data=[1,2].map(c=>{
+    const cd=T.rounds[2].courts[c];
+    const st=computeStandings(T, cd.games, cd.players);
+    return st.map((r,i)=>({rank:i+1, name:playerName(T,r.pid), wp:r.wins+"-"+r.losses,
+      pts:r.forPts+":"+r.againstPts, diff:(r.diff>0?"+":"")+r.diff}));
+  });
+  const cv=document.createElement("canvas");
+  let ctx=cv.getContext("2d");
+  ctx.font="14px Arial";
+  function colWidths(rows){
+    const w=cols.map(c=>ctx.measureText(c).width);
+    for(const r of rows){ const cells=[String(r.rank),r.name,r.wp,r.pts,r.diff];
+      for(let i=0;i<cols.length;i++) w[i]=Math.max(w[i],ctx.measureText(cells[i]).width); }
+    return w.map(x=>Math.ceil(x)+padX*2);
+  }
+  const cw=data.map(colWidths);
+  const tw=cw.map(w=>w.reduce((a,b)=>a+b,0));
+  const W=Math.max(tw[0]+tw[1]+gap+marginX*2, 560);
+  const H=titleArea+headerH+5*rowH+30;
+  cv.width=W; cv.height=H;
+  ctx=cv.getContext("2d");
+  ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,W,H);
+  ctx.textBaseline="top";
+  ctx.fillStyle="#1d2433"; ctx.font="bold 20px Arial";
+  ctx.fillText(T.name, marginX, 14);
+  ctx.fillStyle="#6b7280"; ctx.font="13px Arial";
+  ctx.fillText("Пляжной волейбол · итог по площадкам (2 круг)", marginX, 42);
+  let x=marginX; const y=titleArea;
+  for(let t=0;t<2;t++){
+    ctx.fillStyle="#1d2433"; ctx.font="bold 15px Arial";
+    ctx.fillText("Площадка "+(t+1), x, titleArea-22);
+    drawOneTable(ctx, x, y, cw[t], data[t]);
+    x += tw[t]+gap;
+  }
+  return cv;
+}
+function drawOneTable(ctx, x, y, colW, rows){
+  const rowH=27, headerH=30;
+  const totalW=colW.reduce((a,b)=>a+b,0);
+  const cols=["#","Игрок","В-П","Очки","Разн."];
+  ctx.fillStyle="#1f6feb"; ctx.fillRect(x,y,totalW,headerH);
+  ctx.fillStyle="#ffffff"; ctx.font="bold 13px Arial"; ctx.textBaseline="top";
+  let cx=x; for(let i=0;i<cols.length;i++){ ctx.fillText(cols[i], cx+padX(x,colW,i), y+9); cx+=colW[i]; }
+  ctx.font="14px Arial";
+  for(let r=0;r<rows.length;r++){
+    const ry=y+headerH+r*rowH;
+    if(r===0){ ctx.fillStyle="#e7f6ec"; ctx.fillRect(x,ry,totalW,rowH); }
+    else if(r%2===1){ ctx.fillStyle="#f4f5f7"; ctx.fillRect(x,ry,totalW,rowH); }
+    ctx.fillStyle="#1d2433";
+    const cells=[String(rows[r].rank),rows[r].name,rows[r].wp,rows[r].pts,rows[r].diff];
+    cx=x; for(let i=0;i<cells.length;i++){ ctx.fillText(cells[i], cx+padX(x,colW,i), ry+7); cx+=colW[i]; }
+    ctx.strokeStyle="#e3e6ea"; ctx.beginPath(); ctx.moveTo(x,ry+rowH); ctx.lineTo(x+totalW,ry+rowH); ctx.stroke();
+  }
+  ctx.strokeStyle="#d6d9de"; ctx.strokeRect(x,y,totalW,headerH+rows.length*rowH);
+  function padX(_x,_w,_i){ return 12; }
+}
+function shareResults(){
+  const T=getActive();
+  if(!T || T.phase!=="done" || !T.rounds[2]){ alert("Турнир ещё не завершён."); return; }
+  const canvas=drawTables(T);
+  const slug=(T.name||"tournament").replace(/[^a-zа-я0-9]+/gi,"_").replace(/^_+|_+$/g,"")||"tournament";
+  canvas.toBlob(async function(blob){
+    if(!blob){ alert("Не удалось сгенерировать изображение."); return; }
+    const file=new File([blob], slug+".png", {type:"image/png"});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], text:"Результаты: "+T.name, title:T.name}); return; }catch(e){ if(e.name==="AbortError") return; }
+    }
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=slug+".png";
+    document.body.appendChild(a); a.click(); setTimeout(()=>{document.body.removeChild(a); URL.revokeObjectURL(a.href);}, 100);
+  }, "image/png");
+}
+
+/* ======================= Экспорт / импорт турнира ======================= */
+function slugify(s){ return (s||"tournament").replace(/[^a-zа-я0-9]+/gi,"_").replace(/^_+|_+$/g,"")||"tournament"; }
+function downloadBlob(blob, filename){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{document.body.removeChild(a); URL.revokeObjectURL(a.href);}, 100);
+}
+function exportTournament(id){
+  const T=state.tournaments.find(t=>t.id===id);
+  if(!T) return;
+  const blob=new Blob([JSON.stringify(T,null,2)], {type:"application/json"});
+  downloadBlob(blob, slugify(T.name)+".json");
+}
+function importTournament(input){
+  const file=input.files && input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(){
+    let data;
+    try{ data=JSON.parse(reader.result); }
+    catch(e){ alert("Не удалось прочитать файл: "+e.message); input.value=""; return; }
+    if(!data || !Array.isArray(data.players) || !data.rounds || typeof data.date!=="object"){
+      alert("Файл не похож на турнир (нет players/rounds/date)."); input.value=""; return;
+    }
+    data.id=newId();
+    if(!data.phase) data.phase="setup";
+    if(!data.promotion) data.promotion=null;
+    if(!data.name) data.name=formatDate(data.date);
+    state.tournaments.push(data);
+    refreshActiveUpcoming();
+    save(); render();
+    alert("Импортирован турнир «"+data.name+"».");
+  };
+  reader.readAsText(file);
+  input.value=""; // чтобы можно было выбрать тот же файл снова
+}
+
+/* ======================= Рендер ======================= */
+function topBar(title){
+  return '<header><div class="navtop">'
+    +'<a class="navlink" onclick="goHome()">Грядущий</a>'
+    +'<a class="navlink" onclick="goHistory()">История</a>'
+    +'</div><h1>'+esc(title)+'</h1></header>';
+}
+function bannerIfOver(T){
+  const o=overallMaxRun(T);
+  if(o.max>5) return '<div class="banner">Внимание: макс. серия '+o.max+' (у: '+esc(o.who.join(", "))+'). Это лучший достижимый вариант при данном переходе — гарантировать ≤5 в таких условиях нельзя.</div>';
+  return "";
+}
+function standingsTable(T, st, zones){
+  let rows="";
+  st.forEach((r,i)=>{
+    let cls="";
+    if(zones==="promote" && i<2) cls="zone-prom";
+    if(zones==="relegate" && i>=st.length-2) cls="zone-rel";
+    const runCell = r.run>5 ? '<span class="over">⚠ '+r.run+'</span>' : String(r.run);
+    rows+='<tr class="'+cls+'"><td>'+(i+1)+'</td><td class="name">'+esc(playerName(T,r.pid))+'</td>'
+      +'<td>'+r.wins+'-'+r.losses+'</td><td>'+r.forPts+':'+r.againstPts+'</td>'
+      +'<td>'+(r.diff>0?'+':'')+r.diff+'</td><td>'+runCell+'</td></tr>';
+  });
+  return '<table class="stand"><thead><tr><th>#</th><th class="name">Игрок</th><th>В-П</th><th>Очки</th><th>Разн.</th><th>Серия</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function scheduleBlock(T, round, court, readonly){
+  const games=T.rounds[round].courts[court].games;
+  const next=games.find(g=>g.scoreA==null||g.scoreB==null);
+  let items="";
+  for(const game of games){
+    const isNext=(game===next);
+    const a=game.teamA.map(p=>playerName(T,p)).join(" / ");
+    const b=game.teamB.map(p=>playerName(T,p)).join(" / ");
+    const rest=playerName(T,game.rest);
+    const head='<div class="ghead">Игра '+game.order+' · отдыхает: '+esc(rest)+'</div>';
+    const names='<div class="match-names"><span class="t-left">'+esc(a)+'</span><span class="t-right">'+esc(b)+'</span></div>';
+    if(game.scoreA==null){
+      if(isNext && !readonly){
+        items+='<div class="game next">'+head+names
+          +'<div class="match-score">'
+          +'<input type="number" min="0" id="sc-'+court+'-'+game.order+'-a" placeholder="0" inputmode="numeric" onkeydown="if(event.key===\'Enter\')saveScore('+court+','+game.order+')">'
+          +'<span>:</span>'
+          +'<input type="number" min="0" id="sc-'+court+'-'+game.order+'-b" placeholder="0" inputmode="numeric" onkeydown="if(event.key===\'Enter\')saveScore('+court+','+game.order+')">'
+          +'</div><button onclick="saveScore('+court+','+game.order+')">Сохранить</button></div>';
+      } else {
+        items+='<div class="game">'+head+names+'<div class="pending">—</div></div>';
+      }
+    } else {
+      items+='<div class="game done">'+head+names
+        +'<div class="match-score"><b>'+game.scoreA+'</b><span>:</span><b>'+game.scoreB+'</b></div>'
+        +(readonly?'':'<button class="edit" onclick="clearScore('+court+','+game.order+')" title="Изменить счёт">✎</button>')+'</div>';
+    }
+  }
+  return '<div class="schedule">'+items+'</div>';
+}
+function renderRoundResults(T, round, readonly){
+  let html='<div class="cols">';
+  for(const c of [1,2]){
+    const cd=T.rounds[round].courts[c];
+    const st=computeStandings(T, cd.games, cd.players);
+    const zones=(round===1)?(c===1?"relegate":"promote"):null;
+    html+='<section class="court"><h2>Площадка '+c+'</h2>'
+      +(zones==="relegate"?'<div class="hint">⬇ худшие 2 → площадка 2</div>':'')
+      +(zones==="promote"?'<div class="hint">⬆ лучшие 2 → площадка 1</div>':'')
+      +standingsTable(T, st, zones)
+      +'<h2 style="margin-top:6px">Игры</h2>'+scheduleBlock(T, round, c, readonly)+'</section>';
+  }
+  html+='</div>';
+  return html;
+}
+function renderRoundBody(T, readonly){
+  const r=currentRound(T);
+  let html='<div class="sub">'+(r===1?"Первый круг":"Второй круг")+'</div>'+bannerIfOver(T);
+  if(r===2 && T.rounds[1]){
+    html+='<details class="r-results"><summary>▸ Результаты первого круга</summary>'+renderRoundResults(T,1,true)+'</details>';
+  }
+  html+='<div class="cols">';
+  for(const c of [1,2]){
+    const cd=T.rounds[r].courts[c];
+    const st=computeStandings(T, cd.games, cd.players);
+    const zones=(r===1)?(c===1?"relegate":"promote"):null;
+    html+='<section class="court"><h2>Площадка '+c+'</h2>'
+      +(zones==="relegate"?'<div class="hint">⬇ худшие 2 уходят на площадку 2</div>':'')
+      +(zones==="promote"?'<div class="hint">⬆ лучшие 2 уходят на площадку 1</div>':'')
+      +standingsTable(T, st, zones)
+      +'<h2 style="margin-top:6px">Расписание</h2>'+scheduleBlock(T, r, c, readonly)+'</section>';
+  }
+  html+='</div>';
+  return html;
+}
+function renderBetweenBody(T, readonly){
+  let html='<div class="sub">первый круг завершён</div>'+bannerIfOver(T);
+  html+='<h2 class="r-head">Первый круг — итоги</h2>'+renderRoundResults(T,1,true);
+  const toC1=T.promotion.fromC2toC1.map(p=>playerName(T,p)).join(", ");
+  const toC2=T.promotion.fromC1toC2.map(p=>playerName(T,p)).join(", ");
+  html+='<section class="promo"><p>⬆ На площадку 1: <b>'+esc(toC1)+'</b></p><p>⬇ На площадку 2: <b>'+esc(toC2)+'</b></p></section>';
+  html+='<h2 class="r-head">Второй круг — составы</h2><div class="cols">';
+  for(const c of [1,2]){
+    const cd=T.rounds[2].courts[c];
+    html+='<section class="court"><h2>Площадка '+c+'</h2>'
+      +'<div class="players">Состав: '+esc(cd.players.map(p=>playerName(T,p)).join(", "))+'</div>'
+      +scheduleBlock(T, 2, c, true)+'</section>';
+  }
+  html+='</div>';
+  if(!readonly){
+    html+='<div class="toolbar"><button class="edit" onclick="backToRound1()">← изменить счёт 1 круга</button> '
+      +'<button onclick="startRound2()">Начать второй круг</button></div>';
+  }
+  return html;
+}
+function renderDoneBody(T, readonly){
+  let html='<div class="sub">результаты по кругам</div>'+bannerIfOver(T);
+  html+='<h2 class="r-head">Первый круг</h2>'+renderRoundResults(T,1,true);
+  const toC1=T.promotion.fromC2toC1.map(p=>playerName(T,p)).join(", ");
+  const toC2=T.promotion.fromC1toC2.map(p=>playerName(T,p)).join(", ");
+  html+='<section class="promo"><p>⬆ На площадку 1: <b>'+esc(toC1)+'</b></p><p>⬇ На площадку 2: <b>'+esc(toC2)+'</b></p></section>';
+  html+='<h2 class="r-head">Второй круг (итог по площадкам)</h2>'+renderRoundResults(T,2,true);
+  if(!readonly){
+    html+='<div class="toolbar"><button onclick="shareResults()">📷 Поделиться результатами</button> '
+      +'<button class="edit" onclick="exportTournament('+T.id+')">⬇ Экспорт в файл</button> '
+      +'<button class="edit" onclick="restartTournament()">Начать заново</button> '
+      +'<button onclick="newTournament()">Новый турнир →</button></div>';
+  }
+  return html;
+}
+function renderTournamentBody(T, readonly){
+  switch(T.phase){
+    case "round1": case "round2": return renderRoundBody(T, readonly);
+    case "betweenRounds": return renderBetweenBody(T, readonly);
+    case "done": return renderDoneBody(T, readonly);
+    default: return "";
+  }
+}
+function renderSetup(){
+  const T=getActive();
+  let inputs="";
+  for(let i=0;i<10;i++){
+    const tag = i<5 ? ("П1·"+(i+1)) : ("П2·"+(i-4));
+    inputs+='<li><span class="court-tag">'+tag+'</span><input type="text" id="pname-'+i+'" value="'+esc(T.players[i].name)+'" placeholder="Игрок '+(i+1)+'"></li>';
+  }
+  const hasPrev = !!lastCompleted();
+  return topBar("Грядущий турнир")
+    +'<section class="setup">'
+    +'<div class="tname"><label class="hint">Название турнира</label><input type="text" id="tname" value="'+esc(T.name)+'"></div>'
+    +'<div class="hint">📅 '+formatDate(T.date)+' (ближайшая среда, Москва)</div>'
+    +'<h2 style="margin-top:12px">Участники (10)</h2>'
+    +(hasPrev?'<div class="hint">Состав предзаполнен по итогу прошлого турнира: топ-2 площадки 2 и худшие-2 площадки 1 поменялись местами.</div>':'<div class="hint">Первый турнир: первые 5 — площадка 1, остальные — площадка 2.</div>')
+    +'<ol>'+inputs+'</ol>'
+    +'<div class="toolbar"><button onclick="startTournament()">Начать турнир</button>'
+    +(hasPrev?'<button class="edit" onclick="reshufflePrefill()">Восстановить состав из прошлого</button>':'')
+    +'</div></section>';
+}
+function renderTournament(){
+  const T=getActive();
+  return topBar(T.name)+renderTournamentBody(T, false)
+    +'<footer><button class="danger" onclick="restartTournament()">Начать заново</button></footer>';
+}
+function renderHistoryList(){
+  const list=state.tournaments.filter(t=>t.phase==="done").sort((a,b)=>cmpDate(b.date,a.date));
+  let rows="";
+  if(!list.length) rows='<li class="empty">Пока нет завершённых турниров.</li>';
+  for(const t of list){
+    rows+='<li class="hist-row"><button class="hist-item" onclick="openTournament('+t.id+')">'
+      +'<span class="hist-name">'+esc(t.name)+'</span><span class="hist-date">'+formatDate(t.date)+'</span>'
+      +'</button><button class="hist-del" title="Удалить" onclick="deleteTournament('+t.id+')">✕</button></li>';
+  }
+  return topBar("История турниров")+'<section class="history">'
+    +'<div class="toolbar"><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importTournament(this)">'
+    +'<button class="edit" onclick="document.getElementById(\'importFile\').click()">⬆ Импорт из файла</button></div>'
+    +'<ul>'+rows+'</ul></section>';
+}
+function renderHistoryDetail(){
+  const T=state.tournaments.find(t=>t.id===state.viewId);
+  if(!T){ state.view="history"; return render(); }
+  return topBar(T.name)+'<div class="readonly-note">Просмотр завершённого турнира · '+formatDate(T.date)+'</div>'
+    +renderTournamentBody(T, true)
+    +'<footer><button class="edit" onclick="goHistory()">← К списку</button> '
+    +'<button class="edit" onclick="exportTournament('+T.id+')">⬇ Экспорт в файл</button> '
+    +'<button class="danger" onclick="deleteTournament('+T.id+')">Удалить турнир</button></footer>';
+}
+function autofocus(){
+  const T=getActive();
+  if(state.view==="tournament" && T && (T.phase==="round1"||T.phase==="round2")){
+    const r=currentRound(T);
+    for(const c of [1,2]){
+      const g=T.rounds[r].courts[c].games.find(x=>x.scoreA==null||x.scoreB==null);
+      if(g){ const el=document.getElementById("sc-"+c+"-"+g.order+"-a"); if(el){ el.focus(); break; } }
+    }
+  }
+}
+function render(){
+  const app=document.getElementById("app");
+  const T=getActive();
+  let html;
+  if(state.view==="history") html=renderHistoryList();
+  else if(state.view==="historyDetail") html=renderHistoryDetail();
+  else if(T && T.phase==="setup") html=renderSetup();
+  else html=renderTournament();
+  app.innerHTML=html;
+  autofocus();
+}
+
+/* ======================= Самопроверка ======================= */
+function __test(T){
+  T = T || getActive();
+  let allOk=true;
+  for(const r of [1,2]){
+    if(!T.rounds[r]) continue;
+    for(const c of [1,2]){
+      const court=T.rounds[r].courts[c]; const players=court.players, games=court.games;
+      const plays={},rests={},pairs={};
+      players.forEach(p=>{plays[p]=0;rests[p]=0;});
+      for(const g of games){
+        for(const p of g.teamA)plays[p]++; for(const p of g.teamB)plays[p]++; rests[g.rest]++;
+        for(const team of [g.teamA,g.teamB]){const [x,y]=team;const k=[x,y].sort((m,n)=>m-n).join("-");pairs[k]=(pairs[k]||0)+1;}
+      }
+      const ok4=players.every(p=>plays[p]===4);
+      const okRest=players.every(p=>rests[p]===1);
+      const okPairs=Object.values(pairs).every(v=>v===1)&&Object.keys(pairs).length===10;
+      const runs=players.map(p=>maxRun(T,p));
+      const ok=ok4&&okRest&&okPairs; if(!ok) allOk=false;
+      console.log("R"+r+" C"+c+": 4игры="+ok4+" отдых×1="+okRest+" пары×1="+okPairs+" maxСерия="+Math.max(...runs)+" серии=["+runs.join(",")+"]");
+    }
+  }
+  if(allOk) console.log("✓ инварианты расписания выполнены ("+T.name+")");
+  return allOk;
+}
+
+/* ======================= Инициализация ======================= */
+function init(){
+  ensureActive();
+  refreshActiveUpcoming();
+  const T=getActive();
+  if(T.phase==="setup") state.view="setup";
+  else if(state.view!=="history" && state.view!=="historyDetail") state.view="tournament";
+  if(state.view==="historyDetail" && !state.tournaments.find(t=>t.id===state.viewId)) state.view="setup";
+  render();
+}
+Object.assign(window, { startTournament, reshufflePrefill, startRound2, backToRound1, restartTournament,
+  saveScore, clearScore, newTournament, goHome, goHistory, openTournament, deleteTournament,
+  exportTournament, importTournament, shareResults, __test });
+init();
+</script>
+</body>
+</html>
