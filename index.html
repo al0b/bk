@@ -24,6 +24,13 @@
   .navtop{display:flex;gap:14px;margin-bottom:6px}
   .navlink{color:var(--accent);cursor:pointer;font-size:13px;text-decoration:none}
   .navlink:hover{text-decoration:underline}
+  .sync-badge{margin-left:auto;border:1px solid var(--line);border-radius:6px;padding:2px 8px;background:#fff;color:var(--muted)}
+  .sync-live{color:var(--good);border-color:#bfe3c9}
+  .sync-connecting{color:var(--warn)}
+  .sync-error{color:var(--bad);border-color:#f0c9c5}
+  textarea{width:100%;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:8px;border:1px solid var(--line);border-radius:6px;background:#fff;box-sizing:border-box}
+  code{font:13px ui-monospace,Menlo,Consolas,monospace;background:#eef0f2;padding:1px 4px;border-radius:3px}
+  .link-box{font:12px ui-monospace,Menlo,Consolas,monospace;background:#eef0f2;border:1px solid var(--line);border-radius:6px;padding:8px;word-break:break-all;margin:4px 0 8px}
   h2{font-size:15px;margin:0 0 8px}
   .sub,.hint,.readonly-note{color:var(--muted);font-size:13px}
   .readonly-note{background:var(--warn-bg);border:1px solid #f0d9b5;border-radius:6px;padding:6px 10px;margin:8px 0}
@@ -80,6 +87,7 @@
   .hist-row{display:flex;gap:8px;align-items:stretch;margin:6px 0}
   .hist-row .hist-item{margin:0}
   .hist-del{background:#fff;color:var(--bad);border:1px solid var(--line);border-radius:8px;padding:0 12px;font-weight:700;cursor:pointer;flex:0 0 auto}
+  .hist-edit{background:#fff;color:var(--accent);border:1px solid var(--line);border-radius:8px;padding:0 12px;font-weight:700;cursor:pointer;flex:0 0 auto}
   .empty{color:var(--muted);padding:10px}
   .toolbar{display:flex;flex-wrap:wrap;align-items:center;margin-top:6px}
   details.r-results{margin:8px 0}
@@ -90,6 +98,8 @@
 </head>
 <body>
 <div id="app"></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
 "use strict";
 /* ======================= Константы ======================= */
@@ -106,14 +116,211 @@ const MATCHINGS = [
 const MONTHS_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
 
 /* ======================= Состояние ======================= */
-let state = loadState() || { tournaments: [], activeId: null, view: "setup", viewId: null, seq: 0 };
+let state = loadState() || createInitialState();
 if(typeof state.seq !== "number") state.seq = 0;
 
-function save(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){} }
-function loadState(){ try{ const s=localStorage.getItem(STORAGE_KEY); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function createInitialState(){
+  return { configs:[], rooms:[], activeRoomId:null, view:"setup", viewId:null, seq:0 };
+}
+// активная комната (цепочка турниров)
+function R(){ return state.rooms.find(r=>r.id===state.activeRoomId) || state.rooms[0] || null; }
+function getActive(){ const r=R(); if(!r) return null; return r.tournaments.find(t=>t.id===r.activeId) || null; }
+function lastCompleted(){ const r=R(); if(!r) return null; return r.tournaments.filter(t=>t.phase==="done").sort((a,b)=>cmpDate(b.date,a.date))[0] || null; }
+function save(){ try{ const r=R(); if(r) r.ts=Date.now(); }catch(e){} try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){} pushState(); }
+function loadState(){
+  try{ const s=localStorage.getItem(STORAGE_KEY); if(!s) return null; return migrate(JSON.parse(s)); }catch(e){ return null; }
+}
+// найти/создать конфиг в state.configs по firebase-конфигу (по databaseURL).
+// isLocal=true — добавлен через админ (виден на экране админа); false — авто-создан при подключении по коду (скрыт).
+function ensureConfig(firebase, isLocal){
+  if(!firebase || !firebase.databaseURL) return null;
+  if(!Array.isArray(state.configs)) state.configs=[];
+  let c=state.configs.find(x=>x.firebase && x.firebase.databaseURL===firebase.databaseURL);
+  if(c){ if(isLocal) c.local=true; return c.id; }
+  const id=guid();
+  state.configs.push({id, name: firebase.projectId || firebase.databaseURL, firebase, local: !!isLocal});
+  return id;
+}
+// миграция: старая одиночная цепочка ИЛИ старая multi-room модель → конфиги + roomGuid + ts
+function migrate(st){
+  if(!st) return null;
+  if(!Array.isArray(st.configs)) st.configs=[];
+  if(Array.isArray(st.rooms)){
+    for(const r of st.rooms){
+      if(typeof r.ts!=="number") r.ts=0;
+      if(r.sync && r.sync.config && r.sync.room){            // старая форма {config, room, source}
+        const cid=ensureConfigMigrate(st, r.sync.config);
+        r.sync = { configId: cid, roomGuid: r.sync.room };
+      }
+    }
+    return st;
+  }
+  if(!Array.isArray(st.tournaments)) return null;
+  let sync=null;
+  try{ const fb=JSON.parse(localStorage.getItem("bk-fb")||"null"); if(fb && fb.config) sync=fb; }catch(e){}
+  const room={ id:1, name:"Основная", tournaments:st.tournaments, activeId:st.activeId, ts:0, sync:null };
+  if(sync && sync.config){
+    const cid=ensureConfigMigrate(st, sync.config);
+    room.sync = { configId: cid, roomGuid: sync.room };
+  }
+  return { configs:st.configs, rooms:[room], activeRoomId:1, view:(st.view||"setup"), viewId:st.viewId||null, seq:st.seq||0 };
+}
+// ensureConfig для мигрируемого объекта st (state ещё не присвоен)
+function ensureConfigMigrate(st, firebase){
+  if(!firebase || !firebase.databaseURL) return null;
+  if(!Array.isArray(st.configs)) st.configs=[];
+  let c=st.configs.find(x=>x.firebase && x.firebase.databaseURL===firebase.databaseURL);
+  if(c) return c.id;
+  const id=guid();
+  st.configs.push({id, name: firebase.projectId || firebase.databaseURL, firebase, local:true});   // мигрированные — локальные (введены пользователем)
+  return id;
+}
 function newId(){ state.seq = (state.seq||0)+1; return state.seq; }
-function getActive(){ return state.tournaments.find(t=>t.id===state.activeId) || null; }
-function lastCompleted(){ return state.tournaments.filter(t=>t.phase==="done").sort((a,b)=>cmpDate(b.date,a.date))[0] || null; }
+
+/* ======================= Синхронизация (Firebase RTDB, per активная комната) ======================= */
+// Данные активной комнаты хранятся в Firebase-пути rooms/<roomGuid> (GUID). Конфиг Firebase
+// берётся из state.configs по room.sync.configId. Разные комнаты → разные пути → изоляция.
+let syncRef=null, syncStatus="off", syncRoomKey=null;
+const pendingEchoes = new Set();
+let pendingSync=null;   // {configId, roomGuid, remote} — для конфликт-разрешения при связывании
+
+// Кодирование данных подключения (конфиг Firebase + комната) в строку (XOR + base64url).
+// Это обфускация, не криптография — для приватности используйте правила Firebase/Auth.
+const XOR_KEY = "bk-volley-2026-roomkey";
+function encodeJoin(obj){
+  const bytes=new TextEncoder().encode(JSON.stringify(obj));
+  const k=new TextEncoder().encode(XOR_KEY);
+  const out=new Uint8Array(bytes.length);
+  for(let i=0;i<bytes.length;i++) out[i]=bytes[i]^k[i%k.length];
+  let s=""; for(let i=0;i<out.length;i++) s+=String.fromCharCode(out[i]);
+  let b=btoa(s); b=b.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  return b;
+}
+function decodeJoin(code){
+  if(!code) throw new Error("пустой код");
+  let c=String(code).replace(/-/g,"+").replace(/_/g,"/");
+  while(c.length%4) c+="=";
+  const s=atob(c);
+  const bytes=new Uint8Array(s.length); for(let i=0;i<s.length;i++) bytes[i]=s.charCodeAt(i);
+  const k=new TextEncoder().encode(XOR_KEY);
+  const out=new Uint8Array(bytes.length);
+  for(let i=0;i<bytes.length;i++) out[i]=bytes[i]^k[i%k.length];
+  const json=new TextDecoder().decode(out);
+  return JSON.parse(json);
+}
+function joinUrl(firebase, roomGuid){
+  return location.origin+location.pathname+"?join="+encodeJoin({firebase:firebase, roomGuid:roomGuid});
+}
+function syncLabel(){ return {off:"⚡ локально",connecting:"⟳ подключение…",live:"🌐 синхр.",error:"⚠ ошибка"}[syncStatus]||syncStatus; }
+function setSyncStatus(s){ syncStatus=s; }
+// firebase-конфиг + roomGuid активной комнаты (через configId)
+function syncCfg(){
+  const r=R(); if(!r || !r.sync) return null;
+  const cfg=state.configs.find(c=>c.id===r.sync.configId);
+  if(!cfg || !cfg.firebase || !cfg.firebase.databaseURL) return null;
+  return { firebase: cfg.firebase, roomGuid: r.sync.roomGuid };
+}
+function initSync(skipPull){
+  const s=syncCfg();
+  if(!s || typeof firebase==="undefined" || !firebase.database){ setSyncStatus("off"); syncRoomKey=null; return; }
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(s.firebase);
+    syncRoomKey=s.roomGuid;
+    syncRef=firebase.database().ref("rooms/"+s.roomGuid);
+    setSyncStatus("connecting");
+    syncRef.on("value", onSyncValue, function(){ setSyncStatus("error"); });
+    if(skipPull){ setSyncStatus("live"); return; }
+    syncRef.once("value").then(function(snap){
+      const v=snap.val();
+      if(v!=null) applyRemote(v);   // в комнате есть состояние — берём его
+      else pushState();             // пустая — выгружаем локальное
+      setSyncStatus("live");
+    }).catch(function(){ setSyncStatus("error"); });
+  }catch(e){ setSyncStatus("error"); console.log("initSync error:", e); }
+}
+function onSyncValue(snap){
+  if(!syncRef) return;
+  const v=snap.val(); if(v==null) return;
+  let remote;
+  try{ remote = typeof v==="string" ? JSON.parse(v) : v; }catch(e){ return; }
+  if(remote && remote._nonce && pendingEchoes.has(remote._nonce)){ pendingEchoes.delete(remote._nonce); return; } // своё echo
+  applyRemote(remote);
+}
+function applyRemote(remote){
+  if(remote==null) return;
+  if(typeof remote==="string"){ try{ remote=JSON.parse(remote); }catch(e){ return; } }
+  if(!remote || typeof remote!=="object") return;
+  // применять только в активную комнату, чей sync сейчас подключен (защита от смены комнаты)
+  const r=R(); if(!r || !r.sync || r.sync.roomGuid!==syncRoomKey) return;
+  applyRemoteData(remote);
+}
+// прямое применение удалённых данных (без guard — для конфликт-разрешения и связывания).
+// Синхронизируется только АКТИВНЫЙ турнир (+ мета roomName/ts/activeId); история остаётся локальной.
+function applyRemoteData(remote){
+  if(!remote || typeof remote!=="object") return;
+  const r=R(); if(!r) return;
+  try{
+    delete remote._nonce;
+    if(typeof remote.roomName==="string" && remote.roomName) r.name=remote.roomName;
+    if(typeof remote.ts==="number") r.ts=remote.ts;
+    if(typeof remote.activeId==="number" || typeof remote.activeId==="string") r.activeId=remote.activeId;
+    if(remote.active && typeof remote.active==="object"){
+      const tid=remote.active.id;
+      // safety: гарантировать массив игроков
+      if(!Array.isArray(remote.active.players) || remote.active.players.length<10){
+        remote.active.players=Array.from({length:10},(_,i)=>(Array.isArray(remote.active.players)&&remote.active.players[i]?remote.active.players[i]:{id:i,name:""}));
+      }
+      const idx=r.tournaments.findIndex(t=>t.id===tid);
+      if(idx>=0) r.tournaments[idx]=remote.active; else r.tournaments.push(remote.active);
+      r.activeId=tid;
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    setSyncStatus("live");
+    render();
+  }catch(e){ console.log("applyRemoteData error:", e); }
+}
+function pushState(){
+  if(!syncRef) return;
+  const r=R(); if(!r || !r.sync || r.sync.roomGuid!==syncRoomKey) return;   // не пушить в чужой путь
+  const nonce=Math.random().toString(36).slice(2)+Date.now().toString(36);
+  pendingEchoes.add(nonce);
+  if(pendingEchoes.size>30){ pendingEchoes.clear(); pendingEchoes.add(nonce); }
+  const T=getActive();   // только активный турнир (не вся история) — футпринт не растёт с историей
+  syncRef.set(JSON.stringify({roomName:r.name, ts:r.ts, activeId:r.activeId, active:T, _nonce:nonce}));
+}
+// Загрузить локальные завершённые турниры в rooms/<guid>/history/<tid> (один путь на турнир).
+// Пушится один раз при завершении (R2→done) и при первом связывании. Не растёт с историей — каждый турнир по своему пути.
+function pushHistory(){
+  const s=syncCfg(); if(!s || typeof firebase==="undefined" || !firebase.database) return;
+  const r=R(); if(!r) return;
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(s.firebase);
+    const hRef=firebase.database().ref("roomHistory/"+s.roomGuid);
+    for(const t of r.tournaments){
+      if(t.phase==="done") hRef.child(String(t.id)).set(JSON.stringify(t));
+    }
+  }catch(e){ console.log("pushHistory error:", e); }
+}
+// Выкачать завершённые турниры с сервера (один раз при первом связывании) → добавить в локальную историю.
+function pullHistory(){
+  const s=syncCfg(); if(!s || typeof firebase==="undefined" || !firebase.database) return;
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(s.firebase);
+    firebase.database().ref("roomHistory/"+s.roomGuid).once("value").then(function(snap){
+      const data=snap.val(); if(!data) return;
+      const r=R(); if(!r) return;
+      let changed=false;
+      for(const tid in data){
+        try{
+          const t = typeof data[tid]==="string" ? JSON.parse(data[tid]) : data[tid];
+          if(t && t.id!=null && !r.tournaments.find(x=>x.id===t.id)){ r.tournaments.push(t); changed=true; }
+        }catch(e){}
+      }
+      if(changed){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); render(); }
+    }).catch(function(){});
+  }catch(e){ console.log("pullHistory error:", e); }
+}
+function firstSyncHistory(){ pushHistory(); pullHistory(); }
 
 /* ======================= Утилиты ======================= */
 function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -138,30 +345,32 @@ function dedupeNames(names){
   return out;
 }
 
-/* ======================= Даты (среда по Москве) ======================= */
-function moscowParts(){
-  const f=new Intl.DateTimeFormat("en-US",{timeZone:MOSCOW_TZ, weekday:"short", year:"numeric", month:"2-digit", day:"2-digit"});
-  const o={}; f.formatToParts(new Date()).forEach(p=>{o[p.type]=p.value;});
-  const wd={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[o.weekday];
-  return {year:+o.year, month:+o.month, day:+o.day, wd:wd};
+/* ======================= Даты + GUID ======================= */
+function guid(){
+  try{ if(crypto && crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
+  return Math.random().toString(36).slice(2)+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 }
-// Ближайшая среда (включая сегодня) — для первого запуска; либо строго после after (для следующего турнира).
-function nextWednesday(after){
-  let d, wd;
-  if(after){
-    d=new Date(Date.UTC(after.year, after.month-1, after.day));
-    d.setUTCDate(d.getUTCDate()+1);
-    wd=d.getUTCDay();
-  } else {
-    const p=moscowParts();
-    d=new Date(Date.UTC(p.year, p.month-1, p.day));
-    wd=p.wd;
-  }
-  const delta=(3-wd+7)%7;
-  d.setUTCDate(d.getUTCDate()+delta);
-  return {year:d.getUTCFullYear(), month:d.getUTCMonth()+1, day:d.getUTCDate()};
+function moscowParts(){
+  const f=new Intl.DateTimeFormat("en-US",{timeZone:MOSCOW_TZ, year:"numeric", month:"2-digit", day:"2-digit"});
+  const o={}; f.formatToParts(new Date()).forEach(p=>{o[p.type]=p.value;});
+  return {year:+o.year, month:+o.month, day:+o.day};
+}
+function todayMoscow(){ return moscowParts(); }
+// Календарный сдвиг даты на n дней.
+function addDays(d, n){
+  const x=new Date(Date.UTC(d.year, d.month-1, d.day));
+  x.setUTCDate(x.getUTCDate()+n);
+  return {year:x.getUTCFullYear(), month:x.getUTCMonth()+1, day:x.getUTCDate()};
 }
 function formatDate(d){ return d.day+" "+MONTHS_RU[d.month-1]+" "+d.year; }
+function relativeTime(ts){
+  if(!ts) return "—";
+  const s=Math.max(0, Date.now()-ts)/1000;
+  if(s<60) return "только что";
+  if(s<3600) return Math.floor(s/60)+" мин назад";
+  if(s<86400) return Math.floor(s/3600)+" ч назад";
+  return Math.floor(s/86400)+" д назад";
+}
 
 /* ======================= Расписание ======================= */
 function buildGames(slotOrder){
@@ -238,12 +447,10 @@ function prefillOrder(prev){
 }
 
 /* ======================= ЖЦ турниров ======================= */
+// Дата следующего турнира: последний завершённый + 7 дней; если завершённых нет — сегодня.
 function upcomingDate(){
-  const arr=state.tournaments;
-  if(!arr.length) return nextWednesday(null); // первый турнир — ближайшая среда от сегодня
-  let latest=arr[0];
-  for(const t of arr) if(cmpDate(t.date, latest.date)>0) latest=t;
-  return nextWednesday(latest.date); // следующая среда после последнего турнира (еженедельная каденция)
+  const prev=lastCompleted();
+  return prev ? addDays(prev.date, 7) : todayMoscow();
 }
 function createEmptyUpcoming(){
   const date=upcomingDate();
@@ -254,27 +461,26 @@ function createEmptyUpcoming(){
 function createUpcomingFrom(prev){
   const order=prefillOrder(prev);   // порядок по местам прошлого турнира
   const names=dedupeNames(order.map(pid=>prev.players[pid].name));
-  const date=nextWednesday(prev.date); // следующая среда после прошлого
+  const date=addDays(prev.date, 7); // +7 дней от прошлого
   return { id:newId(), name:formatDate(date), date, phase:"setup",
     players:names.map((n,i)=>({id:i,name:n})),
     rounds:{1:null,2:null}, promotion:null };
 }
 function ensureActive(){
-  if(!state.activeId || !getActive()){
+  if(!state.rooms.length){ state.rooms.push({id:guid(), name:"Основная", tournaments:[], activeId:null, ts:0, sync:null}); state.activeRoomId=state.rooms[0].id; }
+  if(!state.activeRoomId || !R()) state.activeRoomId=state.rooms[0].id;
+  const r=R();
+  if(!r.activeId || !r.tournaments.find(t=>t.id===r.activeId)){
     const prev=lastCompleted();
     const T = prev ? createUpcomingFrom(prev) : createEmptyUpcoming();
-    state.tournaments.push(T); state.activeId=T.id;
+    r.tournaments.push(T); r.activeId=T.id;
   }
 }
-// Пересчитать дату активного «грядущего» (setup) = следующая среда после последнего
-// ДРУГОГО турнира. Гарантирует, что после удаления/импорта дата не «застрянет».
+// Пересчитать дату активного «грядущего» (setup) по правилу: lastCompleted+7 либо сегодня.
 function refreshActiveUpcoming(){
   const T=getActive(); if(!T || T.phase!=="setup") return;
-  const others=state.tournaments.filter(t=>t.id!==T.id);
-  if(!others.length) return; // первый турнир — дату не трогаем
-  let latest=others[0];
-  for(const t of others) if(cmpDate(t.date, latest.date)>0) latest=t;
-  const newDate=nextWednesday(latest.date);
+  const r=R(); if(!r) return;
+  const newDate=upcomingDate();
   if(cmpDate(T.date, newDate)===0) return;
   const wasDefault = !T.name || T.name===formatDate(T.date);
   T.date=newDate;
@@ -345,7 +551,7 @@ function saveScore(court, order){
       }};
       T.promotion={fromC2toC1:p.promoted, fromC1toC2:p.relegated};
       T.phase="betweenRounds";
-    } else { T.phase="done"; }
+    } else { T.phase="done"; pushHistory(); }
   }
   save(); render();
 }
@@ -357,7 +563,7 @@ function clearScore(court, order){
 function newTournament(){
   const prev=getActive();     // завершённый (done)
   const nt=createUpcomingFrom(prev);
-  state.tournaments.push(nt); state.activeId=nt.id; state.view="setup";
+  const r=R(); r.tournaments.push(nt); r.activeId=nt.id; state.view="setup";
   save(); render();
 }
 /* навигация */
@@ -365,13 +571,13 @@ function goHome(){ const T=getActive(); state.view = (T && T.phase!=="setup") ? 
 function goHistory(){ state.view="history"; state.viewId=null; render(); }
 function openTournament(id){ state.view="historyDetail"; state.viewId=id; render(); }
 function deleteTournament(id){
-  const t=state.tournaments.find(x=>x.id===id);
+  const r=R(); const t=r.tournaments.find(x=>x.id===id);
   if(!t) return;
   if(!confirm('Удалить турнир «'+t.name+'» из истории? Действие необратимо.')) return;
-  const idx=state.tournaments.findIndex(x=>x.id===id);
-  state.tournaments.splice(idx,1);
-  if(state.activeId===id){
-    state.activeId=null;
+  const idx=r.tournaments.findIndex(x=>x.id===id);
+  r.tournaments.splice(idx,1);
+  if(r.activeId===id){
+    r.activeId=null;
     ensureActive();
   }
   refreshActiveUpcoming();
@@ -464,7 +670,7 @@ function downloadBlob(blob, filename){
   setTimeout(()=>{document.body.removeChild(a); URL.revokeObjectURL(a.href);}, 100);
 }
 function exportTournament(id){
-  const T=state.tournaments.find(t=>t.id===id);
+  const T=R().tournaments.find(t=>t.id===id);
   if(!T) return;
   const blob=new Blob([JSON.stringify(T,null,2)], {type:"application/json"});
   downloadBlob(blob, slugify(T.name)+".json");
@@ -484,7 +690,7 @@ function importTournament(input){
     if(!data.phase) data.phase="setup";
     if(!data.promotion) data.promotion=null;
     if(!data.name) data.name=formatDate(data.date);
-    state.tournaments.push(data);
+    R().tournaments.push(data);
     refreshActiveUpcoming();
     save(); render();
     alert("Импортирован турнир «"+data.name+"».");
@@ -495,10 +701,16 @@ function importTournament(input){
 
 /* ======================= Рендер ======================= */
 function topBar(title){
+  const r=R(); const rname = r ? esc(r.name) : "";
   return '<header><div class="navtop">'
+    +'<a class="navlink" onclick="goRooms()">Комнаты</a>'
     +'<a class="navlink" onclick="goHome()">Грядущий</a>'
     +'<a class="navlink" onclick="goHistory()">История</a>'
-    +'</div><h1>'+esc(title)+'</h1></header>';
+    +'<a class="navlink" onclick="goAdmin()">Админ</a>'
+    +'<a class="navlink sync-badge sync-'+syncStatus+'" onclick="goSync()" title="Синхронизация">'+syncLabel()+'</a>'
+    +'</div><h1>'+esc(title)+'</h1>'
+    +(rname?'<div class="hint">комната: '+rname+'</div>':'')
+    +'</header>';
 }
 function bannerIfOver(T){
   const o=overallMaxRun(T);
@@ -553,7 +765,7 @@ function renderRoundResults(T, round, readonly){
   for(const c of [1,2]){
     const cd=T.rounds[round].courts[c];
     const st=computeStandings(T, cd.games, cd.players);
-    const zones=(round===1)?(c===1?"relegate":"promote"):null;
+    const zones=c===1?"relegate":"promote";   // зоны перехода: худшие-2 пл.1, лучшие-2 пл.2 — для обоих кругов
     html+='<section class="court"><h2>Площадка '+c+'</h2>'
       +(zones==="relegate"?'<div class="hint">⬇ худшие 2 → площадка 2</div>':'')
       +(zones==="promote"?'<div class="hint">⬆ лучшие 2 → площадка 1</div>':'')
@@ -626,18 +838,326 @@ function renderTournamentBody(T, readonly){
     default: return "";
   }
 }
+function renderRooms(){
+  let rows="";
+  for(const r of state.rooms){
+    const syncBadge = r.sync ? ' 🟢 синхр.' : ' 🔴 локально';
+    const nHist = r.tournaments.filter(t=>t.phase==='done').length;
+    rows+='<li class="hist-row"><button class="hist-item" onclick="enterRoom(\''+r.id+'\')">'
+      +'<span class="hist-name">'+esc(r.name)+syncBadge+'</span>'
+      +'<span class="hist-date">'+nHist+' в истории</span>'
+      +'</button><button class="hist-edit" title="Переименовать" onclick="renameRoom(\''+r.id+'\')">✎</button>'
+      +'<button class="hist-del" title="Удалить" onclick="deleteRoom(\''+r.id+'\')">✕</button></li>';
+  }
+  return topBar("Комнаты")+'<section class="setup">'
+    +'<div class="hint">Каждая комната — своя цепочка турниров и своя история. Синхронизация у каждой своя; можно создать без синхронизации и добавить позже.</div>'
+    +'<input type="text" id="room-name" placeholder="название новой комнаты" style="margin:8px 0">'
+    +'<div class="toolbar"><button onclick="newRoom()">Создать комнату</button></div>'
+    +'<ul class="history" style="margin-top:12px">'+rows+'</ul>'
+    +'<div class="toolbar" style="margin-top:10px"><button class="edit" onclick="goHome()">← К турниру</button></div>'
+    +'</section>';
+}
+function renderSync(){
+  const s=syncCfg();
+  const linked = !!s;
+  const connected = syncStatus==="live" || syncStatus==="connecting";
+  let html = topBar("Синхронизация комнаты")+'<section class="setup">';
+  html += '<div class="hint">Статус: <b>'+syncLabel()+'</b>'+(linked?' · комната «'+esc(R().name)+'» связана':' (нет синхронизации)')+'</div>';
+  if(linked){
+    html += '<div class="toolbar" style="margin:8px 0">'
+      +'<button class="edit" onclick="copyShareLink()">Копировать код</button> '
+      +'<button class="danger" onclick="disconnectSync()">Отключить</button></div>';
+  }
+  if(!linked){
+    html += '<h2 class="r-head">Подключить по коду</h2>';
+    html += '<div class="hint">Вставьте код синхронизации (его создаёт админ на экране «Админ» → конфиг → добавить комнату).</div>';
+    html += '<textarea id="fb-join" rows="3" placeholder="код синхронизации"></textarea>';
+    html += '<div class="toolbar" style="margin-top:8px"><button onclick="joinSync()">Подключить</button></div>';
+  }
+  html += '<div class="hint" style="margin-top:12px">При связывании с непустой удалённой комнатой с разным timestamp будет предложено выбрать: сервер / локально / отмена.</div>';
+  html += '<div class="toolbar" style="margin-top:10px"><button class="edit" onclick="goHome()">← Назад</button></div>';
+  html += '</section>';
+  return html;
+}
+function goSync(){ state.view="sync"; render(); }
+function goRooms(){ state.view="rooms"; render(); }
+function goAdmin(){ state.view="admin"; render(); }
+function resetSyncRef(){ if(syncRef){ try{ syncRef.off(); }catch(e){} } syncRef=null; syncRoomKey=null; pendingEchoes.clear(); setSyncStatus("off"); }
+// Создать новую комнату-цепочку (без синхронизации)
+function newRoom(){
+  const name=(document.getElementById("room-name").value||"").trim() || ("Комната "+(state.rooms.length+1));
+  const room={id:guid(), name, tournaments:[], activeId:null, ts:0, sync:null};
+  state.rooms.push(room); state.activeRoomId=room.id; state.view="setup";
+  ensureActive();
+  resetSyncRef();
+  save();
+  initSync();
+  render();
+}
+// Войти в комнату (переключение → переподключение синхронизации) → открыть грядущий турнир
+function enterRoom(id){
+  state.activeRoomId=id; state.viewId=null;
+  resetSyncRef();
+  ensureActive(); refreshActiveUpcoming();
+  const T=getActive();
+  state.view = (T && T.phase!=="setup") ? "tournament" : "setup";   // грядущий (setup) или текущий турнир
+  save(); render(); initSync(); firstSyncHistory();
+}
+// Переименовать комнату
+function renameRoom(id){
+  const r=state.rooms.find(x=>x.id===id); if(!r) return;
+  const name=prompt("Название комнаты:", r.name);
+  if(name==null) return;             // отмена
+  const trimmed=name.trim();
+  if(!trimmed){ alert("Название не может быть пустым."); return; }
+  r.name=trimmed;
+  save(); render();
+}
+// Удалить комнату
+function deleteRoom(id){
+  const r=state.rooms.find(x=>x.id===id); if(!r) return;
+  if(!confirm('Удалить комнату «'+r.name+'» со всей историей?')) return;
+  const wasActive = state.activeRoomId===id;
+  const idx=state.rooms.findIndex(x=>x.id===id);
+  state.rooms.splice(idx,1);
+  if(wasActive){
+    state.activeRoomId=state.rooms.length ? state.rooms[0].id : null;
+    resetSyncRef();
+    ensureActive();
+  }
+  save(); render();
+  if(wasActive) initSync();
+}
+// Связать активную локальную комнату с удалённой (configId + roomGuid)
+function linkRoom(configId, roomGuid){
+  const r=R(); if(!r) return;
+  r.sync={configId, roomGuid};
+}
+// Подключить по коду (с конфликт-проверкой)
+function joinSync(){
+  const r=R(); if(!r) return;
+  const raw=(document.getElementById("fb-join").value||"").trim();
+  if(!raw){ alert("Вставьте код синхронизации."); return; }
+  let code=raw;
+  try{ const m=raw.match(/[?&]join=([^&]+)/); if(m) code=decodeURIComponent(m[1]); }catch(e){}
+  let parsed;
+  try{ parsed=decodeJoin(code); }
+  catch(e){ alert("Не удалось расшифровать код: "+e.message); return; }
+  if(!parsed || !parsed.firebase || !parsed.firebase.databaseURL || !parsed.roomGuid){ alert("В коде нет данных для подключения."); return; }
+  const configId=ensureConfig(parsed.firebase);
+  const roomGuid=parsed.roomGuid;
+  // прочитать удалённую комнату (once, без подписки)
+  try{
+    if(typeof firebase==="undefined" || !firebase.database){ alert("Firebase недоступен."); return; }
+    if(!firebase.apps.length) firebase.initializeApp(parsed.firebase);
+    setSyncStatus("connecting");
+    firebase.database().ref("rooms/"+roomGuid).once("value").then(function(snap){
+      const v=snap.val();
+      let remote=null;
+      if(v!=null){ try{ remote = typeof v==="string" ? JSON.parse(v) : v; }catch(e){ remote=null; } }
+      if(remote) delete remote._nonce;
+      const remoteHasActive = remote && remote.active;
+      const localHasData = r.tournaments.some(t=>(t.rounds[1]||t.phase!=="setup"));
+      const tsDiffer = !remote || typeof remote.ts!=="number" || r.ts!==remote.ts;
+      if(!remoteHasActive){
+        // удалённая без активного турнира → подключиться (без pull) и выгрузить локал
+        linkRoom(configId, roomGuid); resetSyncRef(); initSync(true); save(); firstSyncHistory(); goHome();
+      } else if(!localHasData || !tsDiffer){
+        // локал пуст или ts совпадает → взять сервер
+        linkRoom(configId, roomGuid); resetSyncRef(); applyRemoteData(remote); initSync(false); firstSyncHistory(); goHome();
+      } else {
+        // конфликт
+        pendingSync={configId, roomGuid, remote};
+        state.view="syncResolve"; render();
+      }
+    }).catch(function(){ setSyncStatus("error"); alert("Не удалось прочитать удалённую комнату."); });
+  }catch(e){ setSyncStatus("error"); alert("Ошибка: "+e.message); }
+}
+// Метаданные для сравнения конфликта: по активному турниру (что и синхронизируется).
+// room — локальная комната; remote — payload {roomName, ts, activeId, active}.
+function activeMeta(name, ts, active){
+  if(!active) return {roomName:name||"?", tournament:"—", phase:"—", matches:0, ts:ts||0};
+  let matches=0;
+  for(const rnd of [1,2]){ const rd=active.rounds && active.rounds[rnd]; if(rd) for(const c of [1,2]) for(const g of rd.courts[c].games) if(g.scoreA!=null && g.scoreB!=null) matches++; }
+  return {roomName:name||"?", tournament:active.name||"?", phase:active.phase||"?", matches, ts:ts||0};
+}
+function localActiveMeta(room){
+  const T = room && room.tournaments.find(t=>t.id===room.activeId);
+  return activeMeta(room && room.name, room && room.ts, T);
+}
+function remoteActiveMeta(remote){
+  return activeMeta(remote && remote.roomName, remote && remote.ts, remote && remote.active);
+}
+function renderSyncResolve(){
+  const p=pendingSync; if(!p){ state.view="sync"; return render(); }
+  const loc=localActiveMeta(R());
+  const rem=remoteActiveMeta(p.remote);
+  const fresher = loc.ts>rem.ts ? "локально" : (rem.ts>loc.ts ? "на сервере" : "одинаково");
+  const moreMatches = loc.matches>rem.matches ? "локально" : (rem.matches>loc.matches ? "на сервере" : "поровну");
+  let html = topBar("Конфликт данных")+'<section class="setup">';
+  html += '<div class="readonly-note">Локальная и удалённая комнаты обе содержат данные, timestamps различаются. Выберите, что сохранить.</div>';
+  html += '<div class="cols"><section class="court"><h2>Локально</h2>'
+    +'<div class="hint">Комната: «'+esc(loc.roomName)+'»</div>'
+    +'<div class="hint">Активный: «'+esc(loc.tournament)+'» ('+esc(loc.phase)+', '+loc.matches+' матчей)</div>'
+    +'<div class="hint">Изменено: '+relativeTime(loc.ts)+'</div></section>'
+    +'<section class="court"><h2>Сервер</h2>'
+    +'<div class="hint">Комната: «'+esc(rem.roomName)+'»</div>'
+    +'<div class="hint">Активный: «'+esc(rem.tournament)+'» ('+esc(rem.phase)+', '+rem.matches+' матчей)</div>'
+    +'<div class="hint">Изменено: '+relativeTime(rem.ts)+'</div></section></div>';
+  html += '<div class="hint" style="margin:8px 0">Свежее: <b>'+fresher+'</b>. Матчей в активном больше: <b>'+moreMatches+'</b>.</div>';
+  html += '<div class="toolbar"><button onclick="chooseServer()">Выбрать сервер</button> '
+    +'<button onclick="chooseLocal()">Выбрать локально</button> '
+    +'<button class="danger" onclick="cancelSync()">Отменить</button></div>';
+  html += '<div class="toolbar" style="margin-top:10px"><button class="edit" onclick="goSync()">← Назад</button></div>';
+  html += '</section>';
+  return html;
+}
+function chooseServer(){
+  const p=pendingSync; if(!p) return;
+  linkRoom(p.configId, p.roomGuid);
+  pendingSync=null;
+  resetSyncRef(); applyRemoteData(p.remote); initSync(false); firstSyncHistory(); goHome();
+}
+function chooseLocal(){
+  const p=pendingSync; if(!p) return;
+  linkRoom(p.configId, p.roomGuid);
+  pendingSync=null;
+  resetSyncRef(); initSync(true);   // подключиться без pull, затем выгрузить локал
+  save();   // pushState перезапишет remote локальными данными
+  firstSyncHistory();
+  goHome();
+}
+function cancelSync(){
+  pendingSync=null;
+  setSyncStatus("off");
+  state.view="sync"; render();
+}
+function disconnectSync(){
+  const r=R(); if(r) r.sync=null;
+  resetSyncRef(); save(); render();
+}
+function copyShareLink(){
+  const s=syncCfg();
+  if(!s){ alert("Комната не связана с синхронизацией."); return; }
+  const url=joinUrl(s.firebase, s.roomGuid);
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(function(){ alert("Код скопирован:\n"+url); }, function(){ alert(url); });
+  } else { alert(url); }
+}
+
+/* ======================= Админ: конфиги и комнаты ======================= */
+function renderAdmin(){
+  let rows="";
+  for(const c of state.configs){
+    if(!c.local) continue;   // только локально добавленные (не полученные через код)
+    rows+='<li class="hist-row"><button class="hist-item" onclick="openAdminConfig(\''+c.id+'\')">'
+      +'<span class="hist-name">'+esc(c.name)+'</span>'
+      +'<span class="hist-date">'+esc(c.firebase.databaseURL)+'</span></button>'
+      +'<button class="hist-del" title="Удалить" onclick="deleteConfig(\''+c.id+'\')">✕</button></li>';
+  }
+  return topBar("Админ · конфиги")+'<section class="setup">'
+    +'<div class="hint">Конфиги Firebase. В каждом — live-список комнат; можно добавить комнату и получить код синхронизации.</div>'
+    +'<h2 class="r-head">Добавить конфиг</h2>'
+    +'<input type="text" id="cfg-name" placeholder="название (напр. Мой Firebase)" style="margin:6px 0">'
+    +'<textarea id="cfg-fb" rows="7" placeholder=\'{ "apiKey":"...", "databaseURL":"https://...", "projectId":"...", "appId":"..." }\'></textarea>'
+    +'<div class="toolbar" style="margin-top:8px"><button onclick="addConfig()">Добавить</button></div>'
+    +'<h2 class="r-head">Конфиги</h2>'
+    +'<ul class="history">'+(rows||'<li class="empty">Пока нет конфигов.</li>')+'</ul>'
+    +'<div class="toolbar" style="margin-top:10px"><button class="edit" onclick="goHome()">← Назад</button></div>'
+    +'</section>';
+}
+function addConfig(){
+  const name=(document.getElementById("cfg-name").value||"").trim() || "Firebase";
+  const raw=(document.getElementById("cfg-fb").value||"").trim();
+  if(!raw){ alert("Вставьте firebaseConfig."); return; }
+  let fb; try{ fb=JSON.parse(raw); }catch(e){ alert("Невалидный JSON: "+e.message); return; }
+  if(!fb || !fb.databaseURL){ alert("Нет databaseURL."); return; }
+  const id=ensureConfig(fb, true);   // добавлен через админ → local
+  const c=state.configs.find(x=>x.id===id); if(c && name) c.name=name;
+  save(); openAdminConfig(id);
+}
+function deleteConfig(id){
+  if(!confirm("Удалить конфиг? Связанные комнаты перестанут синхронизироваться.")) return;
+  state.configs=state.configs.filter(c=>c.id!==id);
+  for(const r of state.rooms) if(r.sync && r.sync.configId===id) r.sync=null;
+  save(); goAdmin();
+}
+function openAdminConfig(id){ state.view="adminConfig"; state.viewId=id; adminConfigRefresh(); }
+function adminConfigRefresh(){
+  const c=state.configs.find(x=>x.id===state.viewId);
+  if(!c){ state.view="admin"; return render(); }
+  if(typeof firebase==="undefined" || !firebase.database){ state._adminRooms={}; render(); return; }
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(c.firebase);
+    firebase.database().ref("rooms").once("value").then(function(snap){
+      state._adminRooms = snap.val() || {};
+      render();
+    }).catch(function(){ state._adminRooms={}; render(); });
+  }catch(e){ state._adminRooms={}; render(); }
+}
+function renderAdminConfig(){
+  const c=state.configs.find(x=>x.id===state.viewId);
+  if(!c){ state.view="admin"; return render(); }
+  const data = state._adminRooms;
+  let rows="";
+  if(data){
+    const guids=Object.keys(data);
+    if(!guids.length) rows='<li class="empty">Комнат пока нет.</li>';
+    for(const g of guids){
+      let m; try{ const v=data[g]; const payload=typeof v==="string"?JSON.parse(v):v; m=remoteActiveMeta(payload); }catch(e){ m={roomName:"?",tournament:"—",phase:"—",matches:0,ts:0}; }
+      rows+='<li class="hist-row"><button class="hist-item" onclick="copyAdminCode(\''+c.id+'\',\''+g+'\')">'
+        +'<span class="hist-name">'+esc(m.roomName||"без названия")+'</span>'
+        +'<span class="hist-date">актив. «'+esc(m.tournament)+'» ('+esc(m.phase)+', '+m.matches+') · '+relativeTime(m.ts)+'</span></button></li>';
+    }
+  } else { rows='<li class="empty">Загрузка…</li>'; }
+  return topBar("Админ · "+c.name)+'<section class="setup">'
+    +'<div class="hint">databaseURL: '+esc(c.firebase.databaseURL)+'</div>'
+    +'<div class="toolbar" style="margin:6px 0"><button class="edit" onclick="adminConfigRefresh()">↻ Обновить</button></div>'
+    +'<h2 class="r-head">Добавить комнату</h2>'
+    +'<input type="text" id="admin-room-name" placeholder="название комнаты" style="margin:6px 0">'
+    +'<div class="toolbar"><button onclick="addRoomAdmin()">Добавить и получить код</button></div>'
+    +'<h2 class="r-head">Комнаты (live)</h2>'
+    +'<ul class="history">'+rows+'</ul>'
+    +'<div class="toolbar" style="margin-top:10px"><button class="edit" onclick="goAdmin()">← К конфигам</button></div>'
+    +'</section>';
+}
+function addRoomAdmin(){
+  const c=state.configs.find(x=>x.id===state.viewId); if(!c) return;
+  const name=(document.getElementById("admin-room-name").value||"").trim() || ("Комната "+Date.now().toString(36));
+  const g=guid();
+  if(typeof firebase==="undefined" || !firebase.database){ alert("Firebase недоступен."); return; }
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(c.firebase);
+    firebase.database().ref("rooms/"+g).set(JSON.stringify({roomName:name, ts:0, activeId:null, active:null})).then(function(){
+      const code=encodeJoin({firebase:c.firebase, roomGuid:g});
+      const url=location.origin+location.pathname+"?join="+code;
+      alert("Комната «"+name+"» создана. Код/ссылка:\n"+url);
+      adminConfigRefresh();
+    }).catch(function(e){ alert("Ошибка записи: "+(e&&e.message||e)); });
+  }catch(e){ alert("Ошибка: "+e.message); }
+}
+function copyAdminCode(configId, roomGuid){
+  const c=state.configs.find(x=>x.id===configId); if(!c) return;
+  const url=location.origin+location.pathname+"?join="+encodeJoin({firebase:c.firebase, roomGuid:roomGuid});
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(function(){alert("Код скопирован:\n"+url);},function(){alert(url);}); } else { alert(url); }
+}
 function renderSetup(){
   const T=getActive();
+  if(!T || !Array.isArray(T.players) || T.players.length<10){
+    // safety: добить массив игроков
+    if(T){ T.players = Array.from({length:10},(_,i)=>(T.players && T.players[i] ? T.players[i] : {id:i, name:""})); }
+  }
   let inputs="";
   for(let i=0;i<10;i++){
     const tag = i<5 ? ("П1·"+(i+1)) : ("П2·"+(i-4));
-    inputs+='<li><span class="court-tag">'+tag+'</span><input type="text" id="pname-'+i+'" value="'+esc(T.players[i].name)+'" placeholder="Игрок '+(i+1)+'"></li>';
+    const pname = (T && T.players && T.players[i]) ? esc(T.players[i].name) : "";
+    inputs+='<li><span class="court-tag">'+tag+'</span><input type="text" id="pname-'+i+'" value="'+pname+'" placeholder="Игрок '+(i+1)+'" oninput="schedSaveSetup()"></li>';
   }
   const hasPrev = !!lastCompleted();
   return topBar("Грядущий турнир")
     +'<section class="setup">'
-    +'<div class="tname"><label class="hint">Название турнира</label><input type="text" id="tname" value="'+esc(T.name)+'"></div>'
-    +'<div class="hint">📅 '+formatDate(T.date)+' (ближайшая среда, Москва)</div>'
+    +'<div class="tname"><label class="hint">Название турнира</label><input type="text" id="tname" value="'+esc(T?T.name:"")+'" oninput="schedSaveSetup()"></div>'
+    +'<div class="hint">📅 '+(T?formatDate(T.date):"")+'</div>'
     +'<h2 style="margin-top:12px">Участники (10)</h2>'
     +(hasPrev?'<div class="hint">Состав предзаполнен по итогу прошлого турнира: топ-2 площадки 2 и худшие-2 площадки 1 поменялись местами.</div>':'<div class="hint">Первый турнир: первые 5 — площадка 1, остальные — площадка 2.</div>')
     +'<ol>'+inputs+'</ol>'
@@ -645,13 +1165,29 @@ function renderSetup(){
     +(hasPrev?'<button class="edit" onclick="reshufflePrefill()">Восстановить состав из прошлого</button>':'')
     +'</div></section>';
 }
+// Сохранить ввод имён/названия с экрана «Грядущий» в активный турнир (debounce) → синхронизация
+let saveSetupTimer=null;
+function schedSaveSetup(){
+  if(saveSetupTimer) clearTimeout(saveSetupTimer);
+  saveSetupTimer=setTimeout(saveSetupFields, 500);
+}
+function saveSetupFields(){
+  const T=getActive(); if(!T || T.phase!=="setup") return;
+  const tnameEl=document.getElementById("tname");
+  if(tnameEl){ const v=tnameEl.value.trim(); if(v) T.name=v; }
+  if(!Array.isArray(T.players) || T.players.length<10) T.players=Array.from({length:10},(_,i)=>({id:i,name:""}));
+  for(let i=0;i<10;i++){ const el=document.getElementById("pname-"+i); if(el) T.players[i].name=el.value; }
+  save();
+}
 function renderTournament(){
   const T=getActive();
   return topBar(T.name)+renderTournamentBody(T, false)
     +'<footer><button class="danger" onclick="restartTournament()">Начать заново</button></footer>';
 }
 function renderHistoryList(){
-  const list=state.tournaments.filter(t=>t.phase==="done").sort((a,b)=>cmpDate(b.date,a.date));
+  const r=R();
+  const synced = !!(r && r.sync);
+  const list=r.tournaments.filter(t=>t.phase==="done").sort((a,b)=>cmpDate(b.date,a.date));
   let rows="";
   if(!list.length) rows='<li class="empty">Пока нет завершённых турниров.</li>';
   for(const t of list){
@@ -659,13 +1195,60 @@ function renderHistoryList(){
       +'<span class="hist-name">'+esc(t.name)+'</span><span class="hist-date">'+formatDate(t.date)+'</span>'
       +'</button><button class="hist-del" title="Удалить" onclick="deleteTournament('+t.id+')">✕</button></li>';
   }
-  return topBar("История турниров")+'<section class="history">'
+  let html = topBar("История турниров")+'<section class="history">'
     +'<div class="toolbar"><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importTournament(this)">'
-    +'<button class="edit" onclick="document.getElementById(\'importFile\').click()">⬆ Импорт из файла</button></div>'
-    +'<ul>'+rows+'</ul></section>';
+    +'<button class="edit" onclick="document.getElementById(\'importFile\').click()">⬆ Импорт из файла</button>';
+  if(synced){
+    html +=' <button class="edit" onclick="uploadHistory()">☁ Upload истории</button>'
+      +'<button class="edit" onclick="downloadHistory()">☁ Download истории</button>';
+  }
+  html +='</div><ul>'+rows+'</ul></section>';
+  return html;
+}
+// Загрузить ВСЕ локальные турниры комнаты (включая активный) в БД (rooms/<guid>/history/<tid>)
+function uploadHistory(){
+  const r=R(); if(!r || !r.sync){ alert("Комната не синхронизирована."); return; }
+  const s=syncCfg(); if(!s || typeof firebase==="undefined" || !firebase.database){ alert("Firebase недоступен."); return; }
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(s.firebase);
+    const hRef=firebase.database().ref("roomHistory/"+s.roomGuid);
+    const promises=[];
+    for(const t of r.tournaments){
+      promises.push(hRef.child(String(t.id)).set(JSON.stringify(t)));
+    }
+    Promise.all(promises).then(function(){
+      alert("Загружено турниров: "+promises.length);
+    }).catch(function(e){ alert("Ошибка: "+(e&&e.message||e)); });
+  }catch(e){ alert("Ошибка: "+e.message); }
+}
+// Скачать ВСЕ турниры из БД (rooms/<guid>/history/) → добавить/обновить в локальной истории
+function downloadHistory(){
+  const r=R(); if(!r || !r.sync){ alert("Комната не синхронизирована."); return; }
+  const s=syncCfg(); if(!s || typeof firebase==="undefined" || !firebase.database){ alert("Firebase недоступен."); return; }
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(s.firebase);
+    firebase.database().ref("roomHistory/"+s.roomGuid).once("value").then(function(snap){
+      const data=snap.val();
+      if(!data){ alert("На сервере нет истории."); return; }
+      let found=0, added=0, updated=0;
+      for(const tid in data){
+        found++;
+        try{
+          const t = typeof data[tid]==="string" ? JSON.parse(data[tid]) : data[tid];
+          if(t && t.id!=null){
+            const idx=r.tournaments.findIndex(x=>x.id===t.id);
+            if(idx<0){ r.tournaments.push(t); added++; }
+            else if(t.phase==="done" && r.tournaments[idx].phase!=="done"){ r.tournaments[idx]=t; updated++; }
+          }
+        }catch(e){}
+      }
+      save(); render();
+      alert("Найдено на сервере: "+found+". Новых: "+added+". Обновлено: "+updated+".");
+    }).catch(function(e){ alert("Ошибка: "+(e&&e.message||e)); });
+  }catch(e){ alert("Ошибка: "+e.message); }
 }
 function renderHistoryDetail(){
-  const T=state.tournaments.find(t=>t.id===state.viewId);
+  const T=R().tournaments.find(t=>t.id===state.viewId);
   if(!T){ state.view="history"; return render(); }
   return topBar(T.name)+'<div class="readonly-note">Просмотр завершённого турнира · '+formatDate(T.date)+'</div>'
     +renderTournamentBody(T, true)
@@ -687,7 +1270,12 @@ function render(){
   const app=document.getElementById("app");
   const T=getActive();
   let html;
-  if(state.view==="history") html=renderHistoryList();
+  if(state.view==="rooms") html=renderRooms();
+  else if(state.view==="admin") html=renderAdmin();
+  else if(state.view==="adminConfig") html=renderAdminConfig();
+  else if(state.view==="sync") html=renderSync();
+  else if(state.view==="syncResolve") html=renderSyncResolve();
+  else if(state.view==="history") html=renderHistoryList();
   else if(state.view==="historyDetail") html=renderHistoryDetail();
   else if(T && T.phase==="setup") html=renderSetup();
   else html=renderTournament();
@@ -723,17 +1311,41 @@ function __test(T){
 
 /* ======================= Инициализация ======================= */
 function init(){
+  // авто-подключение по ссылке ?join=<код>: создать гостевую комнату и подключиться
+  try{
+    const j=new URLSearchParams(location.search).get("join");
+    if(j){
+      const parsed=decodeJoin(j);
+      if(parsed && parsed.firebase && parsed.firebase.databaseURL && parsed.roomGuid){
+        const configId=ensureConfig(parsed.firebase);
+        // не создавать дубликат, если комната с этим roomGuid уже есть
+        const existing=state.rooms.find(r=>r.sync && r.sync.roomGuid===parsed.roomGuid);
+        if(existing){
+          state.activeRoomId=existing.id;
+        } else {
+          const room={id:guid(), name:"Гость", tournaments:[], activeId:null, ts:0,
+            sync:{configId, roomGuid:parsed.roomGuid}};
+          state.rooms.push(room); state.activeRoomId=room.id;
+        }
+        const u=new URL(location.href); u.searchParams.delete("join");
+        history.replaceState(null,"",u.toString());
+      }
+    }
+  }catch(e){}
   ensureActive();
   refreshActiveUpcoming();
   const T=getActive();
-  if(T.phase==="setup") state.view="setup";
-  else if(state.view!=="history" && state.view!=="historyDetail") state.view="tournament";
-  if(state.view==="historyDetail" && !state.tournaments.find(t=>t.id===state.viewId)) state.view="setup";
+  const nav=["rooms","admin","adminConfig","sync","syncResolve","history","historyDetail"];
+  if(!nav.includes(state.view)) state.view = (T && T.phase!=="setup") ? "tournament" : "setup";
+  if(state.view==="historyDetail" && !R().tournaments.find(t=>t.id===state.viewId)) state.view="setup";
   render();
+  initSync();
 }
 Object.assign(window, { startTournament, reshufflePrefill, startRound2, backToRound1, restartTournament,
-  saveScore, clearScore, newTournament, goHome, goHistory, openTournament, deleteTournament,
-  exportTournament, importTournament, shareResults, __test });
+  saveScore, clearScore, newTournament, goHome, goHistory, goRooms, goAdmin, goSync, openTournament, deleteTournament,
+  newRoom, enterRoom, deleteRoom, renameRoom, schedSaveSetup, joinSync, disconnectSync, copyShareLink, chooseServer, chooseLocal, cancelSync,
+  addConfig, deleteConfig, openAdminConfig, adminConfigRefresh, addRoomAdmin, copyAdminCode,
+  uploadHistory, downloadHistory, exportTournament, importTournament, shareResults, __test });
 init();
 </script>
 </body>
