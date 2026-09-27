@@ -94,6 +94,8 @@
   details.r-results>summary{cursor:pointer;font-weight:600;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:6px;font-size:14px}
   details.r-results[open]>summary{margin-bottom:8px}
   h2.r-head{margin:14px 0 6px;font-size:15px}
+  .pos-change{color:var(--good);font-weight:700}
+  .neg-change{color:var(--bad);font-weight:700}
 </style>
 </head>
 <body>
@@ -444,6 +446,47 @@ function prefillOrder(prev){
            st2[0].pid, st2[1].pid,
            st1[3].pid, st1[4].pid,
            st2[2].pid, st2[3].pid, st2[4].pid ];
+}
+// Итоговая таблица турнира: все 10 игроков, по порядку занятых мест (= порядок на следующий турнир).
+// Статистика — за оба круга. Изменение позиции = стартовая позиция (в составе) − финальная.
+function computeOverallStandings(T){
+  const stats=new Map();
+  for(const p of T.players) stats.set(p.id,{wins:0,losses:0,forPts:0,againstPts:0});
+  for(const rnd of [1,2]){
+    const rd=T.rounds[rnd]; if(!rd) continue;
+    for(const c of [1,2]) for(const g of rd.courts[c].games){
+      if(g.scoreA==null||g.scoreB==null) continue;
+      const aWin=g.scoreA>g.scoreB, bWin=g.scoreB>g.scoreA;
+      for(const pid of g.teamA){const s=stats.get(pid);s.forPts+=g.scoreA;s.againstPts+=g.scoreB;if(aWin)s.wins++;else if(bWin)s.losses++;}
+      for(const pid of g.teamB){const s=stats.get(pid);s.forPts+=g.scoreB;s.againstPts+=g.scoreA;if(bWin)s.wins++;else if(aWin)s.losses++;}
+    }
+  }
+  const ranking=prefillOrder(T);
+  return ranking.map((pid,i)=>{
+    const s=stats.get(pid)||{wins:0,losses:0,forPts:0,againstPts:0};
+    const startIdx=T.players.findIndex(p=>p.id===pid);
+    const startPos=startIdx>=0?startIdx+1:0;
+    const finalPos=i+1;
+    return {pid,startPos,finalPos,change:startPos-finalPos,wins:s.wins,losses:s.losses,forPts:s.forPts,againstPts:s.againstPts,diff:s.forPts-s.againstPts};
+  });
+}
+function renderOverallTable(T){
+  const rows=computeOverallStandings(T);
+  let html='<table class="stand"><thead><tr>'
+    +'<th>#</th><th class="name">Игрок</th><th>Δ поз.</th><th>В</th><th>П</th><th>Очки</th><th>Разн.</th>'
+    +'</tr></thead><tbody>';
+  rows.forEach(function(r,i){
+    const ch=r.change>0?'+'+r.change:(r.change<0?String(r.change):'0');
+    const chCls=r.change>0?'pos-change':(r.change<0?'neg-change':'');
+    html+='<tr><td>'+(i+1)+'</td>'
+      +'<td class="name">'+esc(playerName(T,r.pid))+'</td>'
+      +'<td class="'+chCls+'">'+ch+'</td>'
+      +'<td>'+r.wins+'</td><td>'+r.losses+'</td>'
+      +'<td>'+r.forPts+':'+r.againstPts+'</td>'
+      +'<td>'+(r.diff>0?'+':'')+r.diff+'</td></tr>';
+  });
+  html+='</tbody></table>';
+  return html;
 }
 
 /* ======================= ЖЦ турниров ======================= */
@@ -817,6 +860,7 @@ function renderBetweenBody(T, readonly){
 }
 function renderDoneBody(T, readonly){
   let html='<div class="sub">результаты по кругам</div>'+bannerIfOver(T);
+  html+='<h2 class="r-head">Итоговая таблица (оба круга)</h2>'+renderOverallTable(T);
   html+='<h2 class="r-head">Первый круг</h2>'+renderRoundResults(T,1,true);
   const toC1=T.promotion.fromC2toC1.map(p=>playerName(T,p)).join(", ");
   const toC2=T.promotion.fromC1toC2.map(p=>playerName(T,p)).join(", ");
