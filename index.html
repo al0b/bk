@@ -108,12 +108,14 @@
 const STORAGE_KEY = "bk-volley-v2";
 const MOSCOW_TZ = "Europe/Moscow";
 // Близкая 1-факторизация K5: 5 матчей, MATCHINGS[s] отдыхает слот s. Каждая пара — однократно в одной команде.
+// Оптимизировано по min-max разницы сумм номеров команд (меньше номер = сильнее; min суммы = сильнее команда).
+// Max diff = 4 (ни одна игра не имеет разницу сумм >4). Total diff = 14. Альтернативы: max=5 (total=10) или max=6.
 const MATCHINGS = [
-  { a:[1,4], b:[2,3] },
-  { a:[0,2], b:[3,4] },
-  { a:[0,4], b:[1,3] },
-  { a:[0,1], b:[2,4] },
-  { a:[0,3], b:[1,2] },
+  { a:[1,2], b:[3,4] },  // idle 0: sums 3 vs 7, diff 4
+  { a:[0,3], b:[2,4] },  // idle 1: sums 3 vs 6, diff 3
+  { a:[0,4], b:[1,3] },  // idle 2: sums 4 vs 4, diff 0
+  { a:[0,2], b:[1,4] },  // idle 3: sums 2 vs 5, diff 3
+  { a:[0,1], b:[2,3] },  // idle 4: sums 1 vs 5, diff 4
 ];
 const MONTHS_RU = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
 
@@ -542,13 +544,17 @@ function startTournament(){
     if(!v){ alert("Введите имя игрока "+(i+1)); document.getElementById("pname-"+i).focus(); return; }
     names.push(v);
   }
+  // первый отдыхающий (по умолчанию 4 = последний → развёрнутый порядок)
+  const fr1 = document.getElementById("first-rest-1") ? parseInt(document.getElementById("first-rest-1").value,10) : 4;
+  const fr2 = document.getElementById("first-rest-2") ? parseInt(document.getElementById("first-rest-2").value,10) : 4;
   T.name=name;
   T.players=dedupeNames(names).map((n,i)=>({id:i,name:n}));
+  T.firstRest1=fr1; T.firstRest2=fr2;
+  const so1 = slotOrderForCourt([0,1,2,3,4], fr1);
+  const so2 = slotOrderForCourt([5,6,7,8,9], fr2);
   T.rounds={ 1:{courts:{
-      // порядок отдыха развёрнут: в 1-й игре отдыхает последний игрок площадки,
-      // в 5-й — первый (поэтому первый проводит 4 игры подряд в начале круга)
-      1:{players:[0,1,2,3,4], games:buildGames([4,3,2,1,0])},
-      2:{players:[5,6,7,8,9], games:buildGames([9,8,7,6,5])},
+      1:{players:[0,1,2,3,4], games:buildGames(so1)},
+      2:{players:[5,6,7,8,9], games:buildGames(so2)},
     }}, 2:null };
   T.promotion=null; T.phase="round1"; state.view="tournament";
   save(); render();
@@ -613,6 +619,15 @@ function newTournament(){
 function goHome(){ const T=getActive(); state.view = (T && T.phase!=="setup") ? "tournament" : "setup"; state.viewId=null; render(); }
 function goHistory(){ state.view="history"; state.viewId=null; render(); }
 function openTournament(id){ state.view="historyDetail"; state.viewId=id; render(); }
+function renameTournament(id){
+  const r=R(); const t=r.tournaments.find(x=>x.id===id); if(!t) return;
+  const name=prompt("Название турнира:", t.name);
+  if(name==null) return;
+  const trimmed=name.trim();
+  if(!trimmed){ alert("Название не может быть пустым."); return; }
+  t.name=trimmed;
+  save(); render();
+}
 function deleteTournament(id){
   const r=R(); const t=r.tournaments.find(x=>x.id===id);
   if(!t) return;
@@ -832,11 +847,33 @@ function renderRoundBody(T, readonly){
     html+='<section class="court"><h2>Площадка '+c+'</h2>'
       +(zones==="relegate"?'<div class="hint">⬇ худшие 2 уходят на площадку 2</div>':'')
       +(zones==="promote"?'<div class="hint">⬆ лучшие 2 уходят на площадку 1</div>':'')
-      +standingsTable(T, st, zones)
-      +'<h2 style="margin-top:6px">Расписание</h2>'+scheduleBlock(T, r, c, readonly)+'</section>';
+      +standingsTable(T, st, zones);
+    // выбор первого отдыхающего (только R1, только если нет счёта на этой площадке)
+    if(r===1 && !readonly){
+      const hasScores=cd.games.some(g=>g.scoreA!=null||g.scoreB!=null);
+      if(!hasScores && cd.games.length>0){
+        const currentFirst=cd.players.indexOf(cd.games[0].rest);
+        let opts="";
+        for(let i=0;i<cd.players.length;i++){
+          opts+='<option value="'+i+'"'+(i===currentFirst?' selected':'')+'>'+esc(playerName(T,cd.players[i]))+'</option>';
+        }
+        html+='<div class="hint" style="margin:6px 0">Первый отдыхающий: <select onchange="changeFirstRest('+c+', this.value)">'+opts+'</select></div>';
+      }
+    }
+    html+='<h2 style="margin-top:6px">Расписание</h2>'+scheduleBlock(T, r, c, readonly)+'</section>';
   }
   html+='</div>';
   return html;
+}
+// Изменить первого отдыхающего на площадке (R1, до сыгранных игр) → перестроить расписание
+function changeFirstRest(court, firstRestLocalIdx){
+  const T=getActive(); if(!T || T.phase!=="round1") return;
+  const cd=T.rounds[1].courts[court]; if(!cd) return;
+  if(cd.games.some(g=>g.scoreA!=null||g.scoreB!=null)){ alert("На площадке уже есть сыгранные игры — нельзя изменить порядок."); return; }
+  const so=slotOrderForCourt(cd.players, parseInt(firstRestLocalIdx,10));
+  cd.games=buildGames(so);
+  if(court===1) T.firstRest1=parseInt(firstRestLocalIdx,10); else T.firstRest2=parseInt(firstRestLocalIdx,10);
+  save(); render();
 }
 function renderBetweenBody(T, readonly){
   let html='<div class="sub">первый круг завершён</div>'+bannerIfOver(T);
@@ -1198,6 +1235,16 @@ function renderSetup(){
     inputs+='<li><span class="court-tag">'+tag+'</span><input type="text" id="pname-'+i+'" value="'+pname+'" placeholder="Игрок '+(i+1)+'" oninput="schedSaveSetup()"></li>';
   }
   const hasPrev = !!lastCompleted();
+  const fr1 = (T && typeof T.firstRest1==="number") ? T.firstRest1 : 4;
+  const fr2 = (T && typeof T.firstRest2==="number") ? T.firstRest2 : 4;
+  function restSelect(id, courtStart, selVal){
+    let opts="";
+    for(let i=0;i<5;i++){
+      const p=T && T.players[courtStart+i] ? T.players[courtStart+i].name : ("Игрок "+(courtStart+i+1));
+      opts+='<option value="'+i+'"'+(i===selVal?' selected':'')+'>'+esc(p)+'</option>';
+    }
+    return '<select id="'+id+'" onchange="schedSaveSetup()">'+opts+'</select>';
+  }
   return topBar("Грядущий турнир")
     +'<section class="setup">'
     +'<div class="tname"><label class="hint">Название турнира</label><input type="text" id="tname" value="'+esc(T?T.name:"")+'" oninput="schedSaveSetup()"></div>'
@@ -1205,6 +1252,11 @@ function renderSetup(){
     +'<h2 style="margin-top:12px">Участники (10)</h2>'
     +(hasPrev?'<div class="hint">Состав предзаполнен по итогу прошлого турнира: топ-2 площадки 2 и худшие-2 площадки 1 поменялись местами.</div>':'<div class="hint">Первый турнир: первые 5 — площадка 1, остальные — площадка 2.</div>')
     +'<ol>'+inputs+'</ol>'
+    +'<div class="hint" style="margin-top:8px">Первый отдыхающий (игра 1):</div>'
+    +'<div class="cols" style="margin-bottom:8px">'
+    +'<div><span class="hint">Площадка 1:</span> '+restSelect("first-rest-1", 0, fr1)+'</div>'
+    +'<div><span class="hint">Площадка 2:</span> '+restSelect("first-rest-2", 5, fr2)+'</div>'
+    +'</div>'
     +'<div class="toolbar"><button onclick="startTournament()">Начать турнир</button>'
     +(hasPrev?'<button class="edit" onclick="reshufflePrefill()">Восстановить состав из прошлого</button>':'')
     +'</div></section>';
@@ -1221,7 +1273,16 @@ function saveSetupFields(){
   if(tnameEl){ const v=tnameEl.value.trim(); if(v) T.name=v; }
   if(!Array.isArray(T.players) || T.players.length<10) T.players=Array.from({length:10},(_,i)=>({id:i,name:""}));
   for(let i=0;i<10;i++){ const el=document.getElementById("pname-"+i); if(el) T.players[i].name=el.value; }
+  const fr1=document.getElementById("first-rest-1"); if(fr1) T.firstRest1=parseInt(fr1.value,10);
+  const fr2=document.getElementById("first-rest-2"); if(fr2) T.firstRest2=parseInt(fr2.value,10);
   save();
+}
+// slotOrder для площадки: развёрнутый порядок [4,3,2,1,0], ротированный так, что firstRestLocal — первый.
+function slotOrderForCourt(courtPlayerIds, firstRestLocalIdx){
+  const reversed=[4,3,2,1,0];
+  const pos=reversed.indexOf(firstRestLocalIdx);
+  const rot = pos>=0 ? reversed.slice(pos).concat(reversed.slice(0,pos)) : reversed;
+  return rot.map(function(li){ return courtPlayerIds[li]; });
 }
 function renderTournament(){
   const T=getActive();
@@ -1237,7 +1298,8 @@ function renderHistoryList(){
   for(const t of list){
     rows+='<li class="hist-row"><button class="hist-item" onclick="openTournament('+t.id+')">'
       +'<span class="hist-name">'+esc(t.name)+'</span><span class="hist-date">'+formatDate(t.date)+'</span>'
-      +'</button><button class="hist-del" title="Удалить" onclick="deleteTournament('+t.id+')">✕</button></li>';
+      +'</button><button class="hist-edit" title="Переименовать" onclick="renameTournament('+t.id+')">✎</button>'
+      +'<button class="hist-del" title="Удалить" onclick="deleteTournament('+t.id+')">✕</button></li>';
   }
   let html = topBar("История турниров")+'<section class="history">'
     +'<div class="toolbar"><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importTournament(this)">'
@@ -1297,6 +1359,7 @@ function renderHistoryDetail(){
   return topBar(T.name)+'<div class="readonly-note">Просмотр завершённого турнира · '+formatDate(T.date)+'</div>'
     +renderTournamentBody(T, true)
     +'<footer><button class="edit" onclick="goHistory()">← К списку</button> '
+    +'<button class="hist-edit" title="Переименовать" onclick="renameTournament('+T.id+')">✎ Переименовать</button> '
     +'<button class="edit" onclick="exportTournament('+T.id+')">⬇ Экспорт в файл</button> '
     +'<button class="danger" onclick="deleteTournament('+T.id+')">Удалить турнир</button></footer>';
 }
@@ -1386,7 +1449,7 @@ function init(){
   initSync();
 }
 Object.assign(window, { startTournament, reshufflePrefill, startRound2, backToRound1, restartTournament,
-  saveScore, clearScore, newTournament, goHome, goHistory, goRooms, goAdmin, goSync, openTournament, deleteTournament,
+  saveScore, clearScore, newTournament, goHome, goHistory, goRooms, goAdmin, goSync, openTournament, deleteTournament, renameTournament, changeFirstRest,
   newRoom, enterRoom, deleteRoom, renameRoom, schedSaveSetup, joinSync, disconnectSync, copyShareLink, chooseServer, chooseLocal, cancelSync,
   addConfig, deleteConfig, openAdminConfig, adminConfigRefresh, addRoomAdmin, copyAdminCode,
   uploadHistory, downloadHistory, exportTournament, importTournament, shareResults, __test });
